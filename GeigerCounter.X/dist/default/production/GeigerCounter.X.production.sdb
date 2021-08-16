@@ -1,0 +1,273 @@
+[p GLOBOPT AUTOSTATIC IEEE_DBL IEEE_FLT PIC14 PICREGULAR PICMID ]
+[d version 1.1 ]
+[d edition pro ]
+[d chip 16F88 ]
+[d frameptr 0 ]
+"5 C:\Program Files\Microchip\xc8\v2.32\pic\sources\c90\common\awmod.c
+[v ___awmod __awmod `(i  1 e 2 0 ]
+"5 C:\Program Files\Microchip\xc8\v2.32\pic\sources\c90\common\lwdiv.c
+[v ___lwdiv __lwdiv `(ui  1 e 2 0 ]
+"5 C:\Program Files\Microchip\xc8\v2.32\pic\sources\c90\common\lwmod.c
+[v ___lwmod __lwmod `(ui  1 e 2 0 ]
+"10 C:\Program Files\Microchip\xc8\v2.32\pic\sources\c90\common\sprcadd.c
+[v ___fladd __fladd `(d  1 e 4 0 ]
+"4 C:\Program Files\Microchip\xc8\v2.32\pic\sources\c90\common\Umul8.c
+[v ___bmul __bmul `(uc  1 e 1 0 ]
+"4 C:\Program Files\Microchip\xc8\v2.32\pic\sources\c90\common\Umul8_16.c
+[v __Umul8_16 _Umul8_16 `(ui  1 e 2 0 ]
+"6 C:\Program Files\Microchip\xc8\v2.32\pic\sources\c90\pic\__eeprom.c
+[v ___eecpymem __eecpymem `(v  1 e 1 0 ]
+"39
+[v ___memcpyee __memcpyee `(v  1 e 1 0 ]
+"87 C:\Users\micha\Desktop\Projects\Geiger Counter\GeigerCounter.X\main.c
+[v _main main `(v  1 e 1 0 ]
+"304
+[v _isr isr `II(v  1 e 1 0 ]
+"378
+[v _lcd_init lcd_init `(v  1 e 1 0 ]
+"404
+[v _lcd_write_nibble lcd_write_nibble `(v  1 e 1 0 ]
+"423
+[v _lcd_write_byte lcd_write_byte `(v  1 e 1 0 ]
+"438
+[v _lcd_cursor lcd_cursor `(v  1 e 1 0 ]
+"458
+[v _lcd_clear lcd_clear `(v  1 e 1 0 ]
+"464
+[v _lcd_write_string lcd_write_string `(v  1 e 1 0 ]
+"474
+[v _numDigits numDigits `(uc  1 e 1 0 ]
+"488
+[v _intToString intToString `(uc  1 e 1 0 ]
+"59 C:/Program Files/Microchip/MPLABX/v5.50/packs/Microchip/PIC16Fxxx_DFP/1.2.33/xc8\pic\include\proc\pic16f88.h
+[v _TMR0 TMR0 `VEuc  1 e 1 @1 ]
+"166
+[v _PORTA PORTA `VEuc  1 e 1 @5 ]
+[s S98 . 1 `uc 1 RA0 1 0 :1:0 
+`uc 1 RA1 1 0 :1:1 
+`uc 1 RA2 1 0 :1:2 
+`uc 1 RA3 1 0 :1:3 
+`uc 1 RA4 1 0 :1:4 
+`uc 1 RA5 1 0 :1:5 
+`uc 1 RA6 1 0 :1:6 
+`uc 1 RA7 1 0 :1:7 
+]
+"183
+[u S107 . 1 `S98 1 . 1 0 ]
+[v _PORTAbits PORTAbits `VES107  1 e 1 @5 ]
+"228
+[v _PORTB PORTB `VEuc  1 e 1 @6 ]
+[s S119 . 1 `uc 1 RB0 1 0 :1:0 
+`uc 1 RB1 1 0 :1:1 
+`uc 1 RB2 1 0 :1:2 
+`uc 1 RB3 1 0 :1:3 
+`uc 1 RB4 1 0 :1:4 
+`uc 1 RB5 1 0 :1:5 
+`uc 1 RB6 1 0 :1:6 
+`uc 1 RB7 1 0 :1:7 
+]
+"245
+[u S128 . 1 `S119 1 . 1 0 ]
+[v _PORTBbits PORTBbits `VES128  1 e 1 @6 ]
+"310
+[v _INTCON INTCON `VEuc  1 e 1 @11 ]
+"388
+[v _PIR1 PIR1 `VEuc  1 e 1 @12 ]
+"485
+[v _TMR1L TMR1L `VEuc  1 e 1 @14 ]
+"492
+[v _TMR1H TMR1H `VEuc  1 e 1 @15 ]
+"499
+[v _T1CON T1CON `VEuc  1 e 1 @16 ]
+"578
+[v _T2CON T2CON `VEuc  1 e 1 @18 ]
+"747
+[v _CCP1CON CCP1CON `VEuc  1 e 1 @23 ]
+"914
+[v _ADRESH ADRESH `VEuc  1 e 1 @30 ]
+"921
+[v _ADCON0 ADCON0 `VEuc  1 e 1 @31 ]
+"1017
+[v _OPTION_REG OPTION_REG `VEuc  1 e 1 @129 ]
+"1087
+[v _TRISA TRISA `VEuc  1 e 1 @133 ]
+"1149
+[v _TRISB TRISB `VEuc  1 e 1 @134 ]
+"1211
+[v _PIE1 PIE1 `VEuc  1 e 1 @140 ]
+"1335
+[v _OSCCON OSCCON `VEuc  1 e 1 @143 ]
+"1464
+[v _PR2 PR2 `VEuc  1 e 1 @146 ]
+"1735
+[v _ANSEL ANSEL `VEuc  1 e 1 @155 ]
+"1926
+[v _ADRESL ADRESL `VEuc  1 e 1 @158 ]
+"1933
+[v _ADCON1 ADCON1 `VEuc  1 e 1 @159 ]
+"1981
+[v _WDTCON WDTCON `VEuc  1 e 1 @261 ]
+"2146
+[v _ADIE ADIE `VEb  1 e 0 @1126 ]
+"2149
+[v _ADIF ADIF `VEb  1 e 0 @102 ]
+"2437
+[v _RBIE RBIE `VEb  1 e 0 @91 ]
+"2440
+[v _RBIF RBIF `VEb  1 e 0 @88 ]
+"2557
+[v _TMR0IE TMR0IE `VEb  1 e 0 @93 ]
+"2560
+[v _TMR0IF TMR0IF `VEb  1 e 0 @90 ]
+"2566
+[v _TMR1IE TMR1IE `VEb  1 e 0 @1120 ]
+"2569
+[v _TMR1IF TMR1IF `VEb  1 e 0 @96 ]
+"2575
+[v _TMR2IE TMR2IE `VEb  1 e 0 @1121 ]
+"2578
+[v _TMR2IF TMR2IF `VEb  1 e 0 @97 ]
+"72 C:\Users\micha\Desktop\Projects\Geiger Counter\GeigerCounter.X\main.c
+[v _events events `VEuc  1 e 1 0 ]
+"73
+[v _vbatt vbatt `VEus  1 e 2 0 ]
+"74
+[v _hvfb hvfb `VEus  1 e 2 0 ]
+"87
+[v _main main `(v  1 e 1 0 ]
+{
+"89
+[v main@numStr numStr `[6]uc  1 a 6 20 ]
+"269
+[v main@i i `uc  1 a 1 26 ]
+"302
+} 0
+"464
+[v _lcd_write_string lcd_write_string `(v  1 e 1 0 ]
+{
+[v lcd_write_string@stringArray stringArray `*.26uc  1 p 2 5 ]
+"471
+} 0
+"378
+[v _lcd_init lcd_init `(v  1 e 1 0 ]
+{
+"401
+} 0
+"438
+[v _lcd_cursor lcd_cursor `(v  1 e 1 0 ]
+{
+[v lcd_cursor@row row `uc  1 a 1 wreg ]
+"439
+[v lcd_cursor@position position `uc  1 a 1 9 ]
+"438
+[v lcd_cursor@row row `uc  1 a 1 wreg ]
+[v lcd_cursor@column column `uc  1 p 1 5 ]
+"442
+[v lcd_cursor@row row `uc  1 a 1 8 ]
+"456
+} 0
+"4 C:\Program Files\Microchip\xc8\v2.32\pic\sources\c90\common\Umul8.c
+[v ___bmul __bmul `(uc  1 e 1 0 ]
+{
+[v ___bmul@multiplier multiplier `uc  1 a 1 wreg ]
+"6
+[v ___bmul@product product `uc  1 a 1 5 ]
+"4
+[v ___bmul@multiplier multiplier `uc  1 a 1 wreg ]
+[v ___bmul@multiplicand multiplicand `uc  1 p 1 3 ]
+"6
+[v ___bmul@multiplier multiplier `uc  1 a 1 6 ]
+"51
+} 0
+"5 C:\Program Files\Microchip\xc8\v2.32\pic\sources\c90\common\awmod.c
+[v ___awmod __awmod `(i  1 e 2 0 ]
+{
+"10
+[v ___awmod@sign sign `uc  1 a 1 9 ]
+[v ___awmod@counter counter `uc  1 a 1 8 ]
+"5
+[v ___awmod@divisor divisor `i  1 p 2 3 ]
+[v ___awmod@dividend dividend `i  1 p 2 5 ]
+"34
+} 0
+"458 C:\Users\micha\Desktop\Projects\Geiger Counter\GeigerCounter.X\main.c
+[v _lcd_clear lcd_clear `(v  1 e 1 0 ]
+{
+"462
+} 0
+"423
+[v _lcd_write_byte lcd_write_byte `(v  1 e 1 0 ]
+{
+[v lcd_write_byte@byteIn byteIn `uc  1 a 1 wreg ]
+"425
+[v lcd_write_byte@lowerNibble lowerNibble `uc  1 a 1 3 ]
+[v lcd_write_byte@upperNibble upperNibble `uc  1 a 1 2 ]
+"423
+[v lcd_write_byte@byteIn byteIn `uc  1 a 1 wreg ]
+[v lcd_write_byte@RS RS `uc  1 p 1 10 ]
+"427
+[v lcd_write_byte@byteIn byteIn `uc  1 a 1 4 ]
+"436
+} 0
+"404
+[v _lcd_write_nibble lcd_write_nibble `(v  1 e 1 0 ]
+{
+[v lcd_write_nibble@byteIn byteIn `uc  1 a 1 wreg ]
+[v lcd_write_nibble@byteIn byteIn `uc  1 a 1 wreg ]
+[v lcd_write_nibble@RS RS `uc  1 p 1 3 ]
+[v lcd_write_nibble@byteIn byteIn `uc  1 a 1 6 ]
+"420
+} 0
+"488
+[v _intToString intToString `(uc  1 e 1 0 ]
+{
+"492
+[v intToString@whole_portion whole_portion `us  1 a 2 11 ]
+"491
+[v intToString@digits_whole digits_whole `uc  1 a 1 16 ]
+"489
+[v intToString@k k `uc  1 a 1 15 ]
+[v intToString@i i `uc  1 a 1 14 ]
+"491
+[v intToString@digits_decimal digits_decimal `uc  1 a 1 13 ]
+"490
+[v intToString@j j `uc  1 a 1 10 ]
+"488
+[v intToString@number number `us  1 p 2 0 ]
+[v intToString@divisor divisor `us  1 p 2 2 ]
+[v intToString@dest dest `*.4uc  1 p 1 4 ]
+"528
+} 0
+"474
+[v _numDigits numDigits `(uc  1 e 1 0 ]
+{
+[v numDigits@num num `us  1 p 2 3 ]
+"485
+} 0
+"5 C:\Program Files\Microchip\xc8\v2.32\pic\sources\c90\common\lwmod.c
+[v ___lwmod __lwmod `(ui  1 e 2 0 ]
+{
+"10
+[v ___lwmod@counter counter `uc  1 a 1 8 ]
+"5
+[v ___lwmod@divisor divisor `ui  1 p 2 3 ]
+[v ___lwmod@dividend dividend `ui  1 p 2 5 ]
+"25
+} 0
+"5 C:\Program Files\Microchip\xc8\v2.32\pic\sources\c90\common\lwdiv.c
+[v ___lwdiv __lwdiv `(ui  1 e 2 0 ]
+{
+"10
+[v ___lwdiv@quotient quotient `ui  1 a 2 8 ]
+"11
+[v ___lwdiv@counter counter `uc  1 a 1 10 ]
+"5
+[v ___lwdiv@divisor divisor `ui  1 p 2 3 ]
+[v ___lwdiv@dividend dividend `ui  1 p 2 5 ]
+"30
+} 0
+"304 C:\Users\micha\Desktop\Projects\Geiger Counter\GeigerCounter.X\main.c
+[v _isr isr `II(v  1 e 1 0 ]
+{
+"368
+} 0

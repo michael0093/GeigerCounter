@@ -1598,8 +1598,10 @@ void main(void) {
 
     WDTCON = 0b00000101;
 
-    T2CON = 0b00000100;
     PR2 = 80;
+    T2CON = 0b00000100;
+    CCPR1L = 40;
+    CCP1CON = 0b00111100;
 
     PIR1 = 0b00000000;
     PIE1 = 0b01000001;
@@ -1610,7 +1612,7 @@ void main(void) {
     lcd_write_string(" GEIGER COUNTER");
     lcd_cursor(1,6);
     lcd_write_string("V0.1");
-# 196 "main.c"
+# 198 "main.c"
     lcd_write_byte(0x40, 0);
     lcd_write_byte(0b00110, 1);
     lcd_write_byte(0b01001, 1);
@@ -1746,11 +1748,6 @@ void __attribute__((picinterrupt(("")))) isr(void)
         TMR1L = 0x40;
         TMR1IF = 0;
 
-    } else if (TMR2IE & TMR2IF) {
-        PR2 = 80;
-
-        TMR2IF = 0;
-
     } else if (ADIE && ADIF){
 
         if (ADCON0 & 0b00000100){
@@ -1769,7 +1766,7 @@ void __attribute__((picinterrupt(("")))) isr(void)
             ADCON0 |= 0b00001000;
 
 
-            CCP1CON = 0b00111100;
+
 
             __asm("CLRWDT");
         }

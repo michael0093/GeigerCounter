@@ -109,12 +109,13 @@ void main(void) {
         
     WDTCON = 0b00000101;    // 4.096ms watchdog timeout, prescaler is used on Timer0
     
-    CCP1CON = 0b00111100;   // PWM mode, this byte has 2LSBs (0b00XX0000)
-    T2CON  = 0b00000100;    // TMR2 (PWM) on, period = Fosc/4/1
     PR2    = 80;            // 24.69kHz PWM period
+    T2CON  = 0b00000100;    // TMR2 (PWM) on, period = Fosc/4/1
+    CCPR1L = 40;
+    CCP1CON = 0b00111100;   // PWM mode, this byte has 2LSBs (0b00XX0000)
     
     PIR1   = 0b00000000;
-    PIE1   = 0b01000001;    // ADC and Timer1/2 interrupts
+    PIE1   = 0b01000001;    // ADC and Timer1 interrupts
     INTCON = 0b11100000;    //0b11101000;    // Global interrupts enabled, PortB Change interrupt enabled
 
     // Welcome screen with version
@@ -192,7 +193,7 @@ void main(void) {
 //    lcd_write_byte(0b11111, 1);
 //    lcd_write_byte(0b11111, 1);
 //    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
+//    lcd_write_byte(0b11111, 1); 
     
     lcd_write_byte(0x40, 0);    // CGRAM position 0, battery empty
     lcd_write_byte(0b00110, 1);
@@ -328,11 +329,6 @@ void __interrupt() isr(void)
         TMR1H  = TMR1_CLOCK_RATE_H;
         TMR1L  = TMR1_CLOCK_RATE_L;
         TMR1IF = 0;
-        
-    } else if (TMR2IE & TMR2IF) {
-        PR2    = 80;            // 24.69kHz PWM period
-        
-        TMR2IF = 0;
                 
     } else if (ADIE && ADIF){
         // ADC conversion complete, update the boost PWM control loop

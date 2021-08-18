@@ -52,6 +52,11 @@
 #define LCD_DB7             PORTBbits.RB4  // B4 LCD 7 Pin
 #define LCD_DELAY           5       // General delay between commands. 1us works, 40us as long as you'd ever need
 
+#define TARGET_HVFB         689     // 6M6/56k divider so (5* TARGET_HVFB/1023) / (56k / (56k+6M6)) eg 689 counts = 400V
+#define HV_DUTY_MAX         56      // 100% duty = PR2 value. eg 56/80 = 70%
+#define DEFAULT_PID_P       10       // Divided factor
+#define DEFAULT_PID_D       0       // Multiplied factor       
+
 //    A0(an)	HVFB
 //    A1(an)	Vbatt
 //    A2(an)	Backlight
@@ -72,6 +77,8 @@
 volatile char events = 0;
 volatile unsigned short vbatt = 0;
 volatile unsigned short hvfb = 0;
+
+char HV_Startup_Duty = 0;
 
 void nop_delay(volatile unsigned short nops);
 void lcd_init();
@@ -111,7 +118,7 @@ void main(void) {
     
     PR2    = 80;            // 24.69kHz PWM period
     T2CON  = 0b00000100;    // TMR2 (PWM) on, period = Fosc/4/1
-    CCPR1L = 40;
+    CCPR1L = 0;
     CCP1CON = 0b00111100;   // PWM mode, this byte has 2LSBs (0b00XX0000)
     
     PIR1   = 0b00000000;
@@ -265,12 +272,17 @@ void main(void) {
     lcd_write_byte(0b01111, 1);
     lcd_write_byte(0b01111, 1);
     
-    __delay_ms(1000);
+    
+    char j;
+    for(j=0; j<HV_DUTY_MAX+2; j++){     // Show welcome screen for 1s and also ramp up HV. +2 since Needs HV_Startup_Duty to finish >= HV_DUTY_MAX
+        __delay_ms(1000/HV_DUTY_MAX);
+        HV_Startup_Duty++;
+    }
+    
     lcd_clear();
-    
-    char i=0;
-    
+            
     while(1){
+        char i=0;
         
         // Handle interrupt events
         if(events & EVENT_PORTB){   // Handle button/tube event and clear flag
@@ -305,6 +317,10 @@ void main(void) {
 
 void __interrupt() isr(void)
 {
+    static signed short duty = 0;
+    static signed short currError = 0;
+    static signed short prevError = 0;
+    
     if (TMR0IE && TMR0IF) {
         // Timer0 is the ADC sampling trigger
         if (ADCON0 & 0b00000100){
@@ -336,8 +352,7 @@ void __interrupt() isr(void)
             // Unexpected conversion is still running, abort it and come next time
             PORTB |= 0b01000000;
         }
-        
-        
+                
         if ((ADCON0 & 0b00111000) == 0b00001000){   // Vbatt measurement (ch1) is ready
             vbatt = (ADRESH << 8) | ADRESL;
             ADCON0 &= 0b11000111;   // Select Channel 0 (HVFB) for ADC start in TMR0 interrupt
@@ -348,7 +363,21 @@ void __interrupt() isr(void)
             ADCON0 |= 0b00001000;   // Select channel 1 (Vbatt) for ADC start in TMR0 interrupt
             
             // Update the HV control loop
+            prevError = currError;
+            currError = TARGET_HVFB - hvfb;
             
+            duty = duty + (currError/DEFAULT_PID_P) + (currError-prevError)*DEFAULT_PID_D;
+    
+            if(duty < 0){    // HV disabled or some issue with duty calculation
+                duty = 0;
+                
+            } else if (duty > HV_DUTY_MAX){         // Under normal operation the duty is limited to about 70%
+                duty = HV_DUTY_MAX;
+                
+            } else if (duty > HV_Startup_Duty){     // During startup, duty is further limited to reduce in-rush current
+                duty = HV_Startup_Duty;             // Final value of HV_Startup_Duty may be greater than HV_DUTY_MAX so check last
+            }
+            CCPR1L = (char)(duty); 
             
             asm("CLRWDT");  // Clear 2.048ms watchdog timer
         }

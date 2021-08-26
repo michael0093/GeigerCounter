@@ -282,8 +282,19 @@ void main(void) {
     lcd_write_byte(0b01111, 1);
     lcd_write_byte(0b01111, 1);
     
+    // CGRAM position 7 is the graph, make sure RAM is cleared
+    lcd_write_byte(0x0, 1); 
+    lcd_write_byte(0x0, 1);
+    lcd_write_byte(0x0, 1);
+    lcd_write_byte(0x0, 1);
+    lcd_write_byte(0x0, 1);
+    lcd_write_byte(0x0, 1);
+    lcd_write_byte(0x0, 1);
+    lcd_write_byte(0x0, 1);
+    
     char j;
     char graphBlock = 0;
+    unsigned short sessionHigh = 100;
     
     for(j=0; j<HV_DUTY_MAX; j++){     // Show welcome screen for 1s and also ramp up HV
         __delay_ms(1000/HV_DUTY_MAX);
@@ -299,6 +310,26 @@ void main(void) {
             cpm = counts * COUNT_TIME_MULT;
             _100ms = 0;
             counts = 0;     // new time 'block'
+            if (cpm > sessionHigh){
+                sessionHigh = cpm;  // new session maximum
+                // TODO: cehck for alltime maximum
+            }
+            
+            char gY, x;
+            static char dotArray[8][4] = {{0}};
+            gY = (cpm*8)/sessionHigh;
+            
+            dotArray[gY][graphBlock/5] |= 1 << (4-(graphBlock%5));
+                    
+            lcd_write_byte(0x78, 0);    // CGRAM position 7 (0x40 + 7*8 = 0x78)
+         
+            for (x=7; x!=0; x--){
+                lcd_write_byte(dotArray[x][graphBlock/5] , 1);
+            } 
+            
+            lcd_cursor(1, graphBlock/5);
+            lcd_write_byte(7, 1);   // Current graph symbol in CGRAM
+                   
             graphBlock++;
         }
                 
@@ -318,26 +349,9 @@ void main(void) {
         lcd_write_byte(0xE4, 1);
         lcd_write_string("S/h   ");
         lcd_cursor(0,15);
-        lcd_write_byte(6, 1);   // Battery symbol (0x00:Empty to 0x06:Full)
-                        
-        __delay_ms(10);         // Slow down display update to prevent flicker
-                
-        lcd_write_byte(0x78, 0);    // CGRAM position 7 (0x40 + 7*8 = 0x78)
-        lcd_write_byte(0b00000, 1);
-        lcd_write_byte(0b00000, 1);
-        lcd_write_byte(0b11111, 1);
-        lcd_write_byte(0b11111, 1);
-        lcd_write_byte(0b00000, 1);
-        lcd_write_byte(0b00000, 1);
-        lcd_write_byte(0b00000, 1);
-        lcd_write_byte(0b00000, 1);
-        
-        __delay_ms(10);         // Slow down display update to prevent flicker
-    
-        lcd_cursor(1,graphBlock);
-        lcd_write_byte(7, 1);   // Current graph symbol in CGRAM
-        
-        __delay_ms(10);         // Slow down display update to prevent flicker
+        lcd_write_byte(6, 1);       // Battery symbol (0x00:Empty to 0x06:Full)
+                   
+        __delay_ms(50);             // Slow down display update to prevent flicker
         
     }
     return;

@@ -25,7 +25,7 @@
 
 #define _XTAL_FREQ          8000000
 
-#define ADC_TMR0_RATE       0//210     // Timer0 is Fosc/4/8: up to 1.024ms. (256-206 = rate 200us))
+#define ADC_TMR0_RATE       100//210     // Timer0 is Fosc/4/8: up to 1.024ms. (256-206 = rate 200us))
 #define TMR1_CLOCK_RATE_H   0x9E    // Timer1 is Fost/4/8: up to 0.262s. (65536-40536 = Rate = 0.1s)
 #define TMR1_CLOCK_RATE_L   0x40
 
@@ -53,9 +53,16 @@
 #define LCD_DELAY           5       // General delay between commands. 1us works, 40us as long as you'd ever need
 
 #define TARGET_HVFB         689     // 6M6/56k divider so (5* TARGET_HVFB/1023) / (56k / (56k+6M6)) eg 689 counts = 400V
-#define HV_DUTY_MAX         56      // 100% duty = PR2 value. eg 56/80 = 70%
-#define DEFAULT_PID_P       10       // Divided factor
+#define HV_DUTY_MAX         255     // 100% duty = PR2<<2 value. eg 224/(80<<2) = 70%
+#define DEFAULT_PID_P       10      // Divided factor
 #define DEFAULT_PID_D       0       // Multiplied factor       
+
+#define CPM_MAX             9999
+#define COUNT_TIME          100     // x0.1s
+#define COUNT_TIME_MULT     (600/COUNT_TIME)            // Multiply the counts within the COUNT_TIME to get CPM. 600 = 60sec in 0.1s
+#define COUNTS_MAX          (CPM_MAX/COUNT_TIME_MULT)   // Stop counting after this many within the COUNT_TIME
+
+#define BTN_PRESS_100ms     2       // Number of 0.1s before registering button press. "2" could be as short as 100ms and as long as 200ms
 
 //    A0(an)	HVFB
 //    A1(an)	Vbatt
@@ -74,9 +81,12 @@
 //    B6(ioc)	PGC / Buzzer/LED
 //    B7(ioc)	PGD / Button
 
-volatile char events = 0;
-volatile unsigned short vbatt = 0;
-volatile unsigned short hvfb = 0;
+volatile char _100ms = 0;
+volatile char btn = 0;
+volatile unsigned short vbatt  = 0;
+volatile unsigned short hvfb   = 0;
+volatile unsigned short counts = 0;
+unsigned short cpm             = 0;
 
 char HV_Startup_Duty = 0;
 
@@ -119,11 +129,11 @@ void main(void) {
     PR2    = 80;            // 24.69kHz PWM period
     T2CON  = 0b00000100;    // TMR2 (PWM) on, period = Fosc/4/1
     CCPR1L = 0;
-    CCP1CON = 0b00111100;   // PWM mode, this byte has 2LSBs (0b00XX0000)
+    CCP1CON = 0b00001100;   // PWM mode, this byte has 2LSBs (0b00XX0000)
     
     PIR1   = 0b00000000;
     PIE1   = 0b01000001;    // ADC and Timer1 interrupts
-    INTCON = 0b11100000;    //0b11101000;    // Global interrupts enabled, PortB Change interrupt enabled
+    INTCON = 0b11101000;    //0b11101000;    // Global interrupts enabled, PortB Change interrupt enabled
 
     // Welcome screen with version
     lcd_init();
@@ -272,44 +282,62 @@ void main(void) {
     lcd_write_byte(0b01111, 1);
     lcd_write_byte(0b01111, 1);
     
-    
     char j;
-    for(j=0; j<HV_DUTY_MAX+2; j++){     // Show welcome screen for 1s and also ramp up HV. +2 since Needs HV_Startup_Duty to finish >= HV_DUTY_MAX
+    char graphBlock = 0;
+    
+    for(j=0; j<HV_DUTY_MAX; j++){     // Show welcome screen for 1s and also ramp up HV
         __delay_ms(1000/HV_DUTY_MAX);
         HV_Startup_Duty++;
     }
+    HV_Startup_Duty = HV_DUTY_MAX;
     
     lcd_clear();
             
     while(1){
-        char i=0;
         
-        // Handle interrupt events
-        if(events & EVENT_PORTB){   // Handle button/tube event and clear flag
-            events &= ~EVENT_PORTB;
+        if(_100ms > COUNT_TIME){   // After the count time, 
+            cpm = counts * COUNT_TIME_MULT;
+            _100ms = 0;
+            counts = 0;     // new time 'block'
+            graphBlock++;
         }
-        if(events & EVENT_100ms){   // Update time and clear flag
-//            PORTB ^= 0b01000000;
-            events &= ~EVENT_100ms;
+                
+        if(btn > BTN_PRESS_100ms && btn != 255){
+            PORTB ^= 0b01000000;
+            btn = 255;  // Don't keep re-triggering until release
+            graphBlock = 0;
         }
-        
+            
         // 9999CPM 0.1us/hB   0CPM 0.0us/h   B
         lcd_cursor(0,0);
-        intToString(vbatt, 1, numStr);
+        intToString(cpm, 1, numStr);
         lcd_write_string(numStr);
         lcd_write_string("CPM ");
-        intToString(hvfb, 1, numStr);
+        intToString(counts, 1, numStr);
         lcd_write_string(numStr);
-        lcd_write_string("uS/h   ");
+        lcd_write_byte(0xE4, 1);
+        lcd_write_string("S/h   ");
         lcd_cursor(0,15);
-        lcd_write_byte(i, 1);   // Battery symbol (0x00:Empty to 0x06:Full)
-        __delay_ms(500);
+        lcd_write_byte(6, 1);   // Battery symbol (0x00:Empty to 0x06:Full)
+                        
+        __delay_ms(10);         // Slow down display update to prevent flicker
+                
+        lcd_write_byte(0x78, 0);    // CGRAM position 7 (0x40 + 7*8 = 0x78)
+        lcd_write_byte(0b00000, 1);
+        lcd_write_byte(0b00000, 1);
+        lcd_write_byte(0b11111, 1);
+        lcd_write_byte(0b11111, 1);
+        lcd_write_byte(0b00000, 1);
+        lcd_write_byte(0b00000, 1);
+        lcd_write_byte(0b00000, 1);
+        lcd_write_byte(0b00000, 1);
         
-        if(i<6){
-            i++;
-        }else{
-            i=0;
-        }
+        __delay_ms(10);         // Slow down display update to prevent flicker
+    
+        lcd_cursor(1,graphBlock);
+        lcd_write_byte(7, 1);   // Current graph symbol in CGRAM
+        
+        __delay_ms(10);         // Slow down display update to prevent flicker
         
     }
     return;
@@ -320,13 +348,13 @@ void __interrupt() isr(void)
     static signed short duty = 0;
     static signed short currError = 0;
     static signed short prevError = 0;
+//    static signed short integral  = 0;
     
     if (TMR0IE && TMR0IF) {
         // Timer0 is the ADC sampling trigger
         if (ADCON0 & 0b00000100){
             // Unexpected conversion is still running, abort it and come next time
             ADCON0 &= 0b11111011;
-            PORTB |= 0b01000000;
             
         } else if ((ADCON0 & 0b00111000) == 0b00001000){        // Last measurement was Vbatt (ch1)
             ADCON0 |= 0b00000100;   // Start conversion of channel 0 (HVFB) set in ADIF interrupt
@@ -340,53 +368,79 @@ void __interrupt() isr(void)
         
     } else if (TMR1IE && TMR1IF) {
         // Timer1 is the 0.1s main time base
-        events |= EVENT_100ms;
+        _100ms++;
         
+        if(PORTB & 0b10000000){     // Every 100ms we get closer to a good button register. If IOC detects the pin go low, btn is reset
+            if(btn < 254){          // 255 is the 'latched' value, meaning the main code doesnt want to process the button further
+                btn++;
+            }
+        }
+               
         TMR1H  = TMR1_CLOCK_RATE_H;
         TMR1L  = TMR1_CLOCK_RATE_L;
         TMR1IF = 0;
                 
     } else if (ADIE && ADIF){
+//        PORTB |= 0b01000000;
         // ADC conversion complete, update the boost PWM control loop
         if (ADCON0 & 0b00000100){
             // Unexpected conversion is still running, abort it and come next time
-            PORTB |= 0b01000000;
-        }
+        } else {
                 
-        if ((ADCON0 & 0b00111000) == 0b00001000){   // Vbatt measurement (ch1) is ready
-            vbatt = (ADRESH << 8) | ADRESL;
-            ADCON0 &= 0b11000111;   // Select Channel 0 (HVFB) for ADC start in TMR0 interrupt
-            
-        } else if ((ADCON0 & 0b00111000) == 0){     // HVFB measurement (ch0) is ready
-            hvfb = (ADRESH << 8) | ADRESL;
-            ADCON0 &= 0b11000111;
-            ADCON0 |= 0b00001000;   // Select channel 1 (Vbatt) for ADC start in TMR0 interrupt
-            
-            // Update the HV control loop
-            prevError = currError;
-            currError = TARGET_HVFB - hvfb;
-            
-            duty = duty + (currError/DEFAULT_PID_P) + (currError-prevError)*DEFAULT_PID_D;
-    
-            if(duty < 0){    // HV disabled or some issue with duty calculation
-                duty = 0;
+            if ((ADCON0 & 0b00111000) == 0b00001000){   // Vbatt measurement (ch1) is ready
+                vbatt = (ADRESH << 8) | ADRESL;
+                ADCON0 &= 0b11000111;   // Select Channel 0 (HVFB) for ADC start in TMR0 interrupt
+
+            } else if ((ADCON0 & 0b00111000) == 0){     // HVFB measurement (ch0) is ready
+                hvfb = (ADRESH << 8) | ADRESL;
+                ADCON0 &= 0b11000111;
+                ADCON0 |= 0b00001000;   // Select channel 1 (Vbatt) for ADC start in TMR0 interrupt
+
+                // Update the HV control loop
+                prevError = currError;
+                currError = TARGET_HVFB - hvfb;
+//                integral += currError;
+
+//                unsigned short v;
+//                v = integral/2048;
+
+                //currError = currError / (signed short)(vbatt);
+
+                duty = duty + (currError/8) + ((currError-prevError)/1);
+
+                if(duty < 0){    // HV disabled or some issue with duty calculation
+                    duty = 0;
+
+                } else if (duty > HV_DUTY_MAX){         // Under normal operation the duty is limited to about 70%
+                    duty = HV_DUTY_MAX;
+
+                } else if (duty > HV_Startup_Duty){     // During startup, duty is further limited to reduce in-rush current
+                    duty = HV_Startup_Duty;             // Final value of HV_Startup_Duty may be greater than HV_DUTY_MAX so check last
+                }
                 
-            } else if (duty > HV_DUTY_MAX){         // Under normal operation the duty is limited to about 70%
-                duty = HV_DUTY_MAX;
-                
-            } else if (duty > HV_Startup_Duty){     // During startup, duty is further limited to reduce in-rush current
-                duty = HV_Startup_Duty;             // Final value of HV_Startup_Duty may be greater than HV_DUTY_MAX so check last
+                CCP1CON &= 0b11001111;
+                CCP1CON |= (((char)(duty)) & ~0xFC) << 4;   // This byte has 2LSBs (0b00XX0000)
+                CCPR1L   = (((char)(duty)) &  0xFC) >> 2; 
+
+//                CCPR1L   = (char)(duty);
+                        
+                asm("CLRWDT");  // Clear 2.048ms watchdog timer
             }
-            CCPR1L = (char)(duty); 
-            
-            asm("CLRWDT");  // Clear 2.048ms watchdog timer
         }
-               
+//        PORTB &= ~0b01000000;
         ADIF = 0;
         
     } else if (RBIE && RBIF){
-        // PortB change handles button and tube inputs
-        events |= EVENT_PORTB;
+        // PortB change handles tube input
+                
+        if(PORTB & 0b00100000){     // Tube pulse detected
+            if( counts < COUNTS_MAX) {
+                counts++;
+            }
+        }
+        if(!(PORTB & 0b10000000)){  // Every 100ms we get closer to a good button register. If IOC detects the pin go low, btn is reset
+            btn = 0;
+        }
         
         RBIF = 0;
     }

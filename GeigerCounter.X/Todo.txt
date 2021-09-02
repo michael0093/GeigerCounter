@@ -1,0 +1,3 @@
+Graph display
+Button-screen interface
+alltime max from EEPROM

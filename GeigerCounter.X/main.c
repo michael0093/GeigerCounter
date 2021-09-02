@@ -9,7 +9,7 @@
 #pragma config FOSC = INTOSCIO  // Oscillator Selection bits (INTRC oscillator; port I/O function on both RA6/OSC2/CLKO pin and RA7/OSC1/CLKI pin)
 #pragma config WDTE = ON        // Watchdog Timer Enable bit 
 #pragma config PWRTE = ON       // Power-up Timer Enable bit (PWRT enabled)
-#pragma config MCLRE = OFF      // RA5/MCLR/VPP Pin Function Select bit 
+#pragma config MCLRE = ON      // RA5/MCLR/VPP Pin Function Select bit 
 #pragma config BOREN = ON       // Brown-out Reset Enable bit (BOR enabled)
 #pragma config LVP = OFF        // Low-Voltage Programming Enable bit (RB3/PGM pin has RB3 function, LVP disabled)
 #pragma config CPD = OFF        // Data EE Memory Code Protection bit (Code protection off)
@@ -35,7 +35,7 @@
 #define EVENT_PORTB         0b00100000
 #define EVENT_100ms         0b00010000
 
-// 5x7 display supports battery capacitor symbol 0-6
+// 5x8 display supports battery capacitor symbol 0-6 (7 states)
 #define VBATT_6of6          829     // >4.05V
 #define VBATT_5of6          808     // >3.95V
 #define VBATT_4of6          788     // >3.85V
@@ -58,9 +58,12 @@
 #define DEFAULT_PID_D       0       // Multiplied factor       
 
 #define CPM_MAX             9999
-#define COUNT_TIME          100     // x0.1s
+#define COUNT_TIME          100     // x0.1s CPM calculation time window (update rate)
+#define BATT_TIME           5       // x0.1s Battery symbol update rate
+
 #define COUNT_TIME_MULT     (600/COUNT_TIME)            // Multiply the counts within the COUNT_TIME to get CPM. 600 = 60sec in 0.1s
 #define COUNTS_MAX          (CPM_MAX/COUNT_TIME_MULT)   // Stop counting after this many within the COUNT_TIME
+#define CPM_uS_SCALE        50       // multiply CPM by this to get uS/hr
 
 #define BTN_PRESS_100ms     2       // Number of 0.1s before registering button press. "2" could be as short as 100ms and as long as 200ms
 
@@ -81,12 +84,12 @@
 //    B6(ioc)	PGC / Buzzer/LED
 //    B7(ioc)	PGD / Button
 
-volatile char _100ms = 0;
 volatile char btn = 0;
-volatile unsigned short vbatt  = 0;
-volatile unsigned short hvfb   = 0;
-volatile unsigned short counts = 0;
-unsigned short cpm             = 0;
+volatile unsigned short vbatt   = 0;
+volatile unsigned short hvfb    = 0;
+volatile unsigned short counts  = 0;
+unsigned short cpm              = 0;
+volatile unsigned long runtime  = 0;     // in 100ms increments
 
 char HV_Startup_Duty = 0;
 
@@ -98,8 +101,9 @@ void lcd_write_byte(char byteIn, char RS);
 void lcd_write_nibble(char byteIn, char RS);
 void lcd_write_string(char *stringArray);
 
+void clear_graph();
 char numDigits(unsigned short num);
-char intToString(unsigned short number, unsigned short divisor, char* dest);    // Convert long to null terminated string. When divisor=1, you get exactly what you put in
+char intToString(unsigned short number, unsigned short divisor, char* dest, char fixedWidth);    // Convert long to null terminated string. When divisor=1, you get exactly what you put in
 
 void main(void) {
     
@@ -140,161 +144,14 @@ void main(void) {
     lcd_write_string(" GEIGER COUNTER");
     lcd_cursor(1,6);
     lcd_write_string("V0.1");
-    
-    // Load the battery level indicators so we can just pick the right one at runtime
-//    lcd_write_byte(0x40, 0);    // CGRAM position 0, battery empty
-//    lcd_write_byte(0b01110, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b11111, 1);
-//    
-//    // CGRAM position 1
-//    lcd_write_byte(0b01110, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    
-//    // CGRAM position 2
-//    lcd_write_byte(0b01110, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    
-//    // CGRAM position 3
-//    lcd_write_byte(0b01110, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    
-//    // CGRAM position 4
-//    lcd_write_byte(0b01110, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    
-//    // CGRAM position 5
-//    lcd_write_byte(0b01110, 1);
-//    lcd_write_byte(0b10001, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    
-//    // CGRAM position 6, battery full
-//    lcd_write_byte(0b01110, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1);
-//    lcd_write_byte(0b11111, 1); 
-    
-    lcd_write_byte(0x40, 0);    // CGRAM position 0, battery empty
-    lcd_write_byte(0b00110, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01111, 1);
-    
-    // CGRAM position 1
-    lcd_write_byte(0b00110, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    
-    // CGRAM position 2
-    lcd_write_byte(0b00110, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    
-    // CGRAM position 3
-    lcd_write_byte(0b00110, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    
-    // CGRAM position 4
-    lcd_write_byte(0b00110, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    
-    // CGRAM position 5
-    lcd_write_byte(0b00110, 1);
-    lcd_write_byte(0b01001, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    
-    // CGRAM position 6, battery full
-    lcd_write_byte(0b00110, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    lcd_write_byte(0b01111, 1);
-    
-    // CGRAM position 7 is the graph, make sure RAM is cleared
-    lcd_write_byte(0x0, 1); 
-    lcd_write_byte(0x0, 1);
-    lcd_write_byte(0x0, 1);
-    lcd_write_byte(0x0, 1);
-    lcd_write_byte(0x0, 1);
-    lcd_write_byte(0x0, 1);
-    lcd_write_byte(0x0, 1);
-    lcd_write_byte(0x0, 1);
+        
+    clear_graph();
     
     char j;
     char graphBlock = 0;
-    unsigned short sessionHigh = 100;
+    char displayState = 0;  // 0: normal screen. 1: session max. 2: alltime max
+    unsigned short sessionHigh = 0;
+    unsigned short alltimeHigh = 0;
     
     for(j=0; j<HV_DUTY_MAX; j++){     // Show welcome screen for 1s and also ramp up HV
         __delay_ms(1000/HV_DUTY_MAX);
@@ -303,53 +160,221 @@ void main(void) {
     HV_Startup_Duty = HV_DUTY_MAX;
     
     lcd_clear();
+    
+    runtime = 0;    // Reset runtime counter just before start so that battery icon gets shown immediately
             
     while(1){
         
-        if(_100ms > COUNT_TIME){   // After the count time, 
+        if(runtime % COUNT_TIME == 0){   // It is a multiple of the count time
+            
+            // Update CPM and the alltime/session maximums
             cpm = counts * COUNT_TIME_MULT;
-            _100ms = 0;
             counts = 0;     // new time 'block'
             if (cpm > sessionHigh){
                 sessionHigh = cpm;  // new session maximum
                 // TODO: cehck for alltime maximum
             }
             
-            char gY, x;
-            static char dotArray[8][4] = {{0}};
-            gY = (cpm*8)/sessionHigh;
             
-            dotArray[gY][graphBlock/5] |= 1 << (4-(graphBlock%5));
+            // Update the graph
+            char x, block;
+            unsigned short gY;
+            static char dotArray[8][7] = {{0}};
+            
+            gY = cpm*8;
+            gY = gY / sessionHigh;
+            
+//            dotArray[gY][graphBlock/5] |= 1 << (4-(graphBlock%5));
+            dotArray[0][0] = 1;
+            dotArray[1][0] = 2;
+            dotArray[2][0] = 3;
+            dotArray[3][0] = 4;
+            dotArray[4][0] = 5;
+            dotArray[5][0] = 6;
+            dotArray[6][0] = 7;
+            dotArray[7][0] = 8;
                     
-            lcd_write_byte(0x78, 0);    // CGRAM position 7 (0x40 + 7*8 = 0x78)
+            lcd_write_byte(0x40, 0);    // Start at CGRAM position 0, fills 0-6
          
-            for (x=7; x!=0; x--){
-                lcd_write_byte(dotArray[x][graphBlock/5] , 1);
-            } 
-            
-            lcd_cursor(1, graphBlock/5);
-            lcd_write_byte(7, 1);   // Current graph symbol in CGRAM
-                   
+            for(block=0; block<7; block++){
+                for (x=0; x<8; x++){
+                    lcd_write_byte(dotArray[7-x][block], 1);
+                } 
+            }
+            // Display is updated immediately when CGRAM changes
             graphBlock++;
+            
+            if(graphBlock > 7*5){                   // 7 blocks of 5 dots wide
+                for(block=0; block<7; block++){     // Left shift the graph by one block
+                    for(x=0; x<8; x++){
+                        dotArray[x][block] = dotArray[x][block+1];
+                    }
+                }
+                for(x=0; x<8; x++){                 // Clear the last block ready for new data
+                    dotArray[x][7] = 0;
+                }
+                
+                graphBlock = graphBlock-5;          // Graph pointer to start of the last block which is now blank
+            }
+            
+            // Update the battery status
+            lcd_write_byte(0x78, 0);    // CGRAM position 7, battery symbol
+            if(vbatt >= VBATT_6of6){
+                // Battery full 6/6
+                lcd_write_byte(0b00110, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+
+            } else if ( vbatt >= VBATT_5of6){
+                lcd_write_byte(0b00110, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+
+            } else if ( vbatt >= VBATT_4of6){
+                lcd_write_byte(0b00110, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+
+            } else if ( vbatt >= VBATT_3of6){
+                lcd_write_byte(0b00110, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+
+            } else if ( vbatt >= VBATT_2of6){
+                lcd_write_byte(0b00110, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+
+            } else if ( vbatt >= VBATT_1of6){
+                lcd_write_byte(0b00110, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01111, 1);
+                lcd_write_byte(0b01111, 1);
+
+            } else if ( vbatt >= VBATT_0of6){
+                lcd_write_byte(0b00110, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b01111, 1);
+
+            } else {
+                lcd_write_byte(0b00110, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b00000, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b00000, 1);
+                lcd_write_byte(0b01001, 1);
+                lcd_write_byte(0b00000, 1);
+                lcd_write_byte(0b01111, 1);
+            }
+
         }
                 
         if(btn > BTN_PRESS_100ms && btn != 255){
-            PORTB ^= 0b01000000;
             btn = 255;  // Don't keep re-triggering until release
-            graphBlock = 0;
+            if(displayState < 2){
+                displayState++;
+            } else {
+                displayState = 0;
+            }
         }
+        
+        switch (displayState){
             
-        // 9999CPM 0.1us/hB   0CPM 0.0us/h   B
-        lcd_cursor(0,0);
-        intToString(cpm, 1, numStr);
-        lcd_write_string(numStr);
-        lcd_write_string("CPM ");
-        intToString(counts, 1, numStr);
-        lcd_write_string(numStr);
-        lcd_write_byte(0xE4, 1);
-        lcd_write_string("S/h   ");
-        lcd_cursor(0,15);
-        lcd_write_byte(6, 1);       // Battery symbol (0x00:Empty to 0x06:Full)
+            default:
+            case 0: // Normal (counter) screen
+                // 9999CPM 0.1us/hB   0CPM 0.0us/h   B
+                lcd_cursor(0,0);
+                intToString(cpm, 1, numStr, 1);
+                lcd_write_string(numStr);
+                lcd_write_string("CPM ");
+                intToString(counts, 1, numStr, 1);
+                lcd_write_string(numStr);
+                lcd_write_byte(0xE4, 1);
+                lcd_write_string("S/h      ");
+
+                // Run Timer
+                lcd_cursor(1,0);
+                intToString(runtime/36000, 1, numStr, 1);          // Runtime hours
+                lcd_write_string(numStr);
+                lcd_write_byte(':', 1);
+                intToString((runtime%36000)/600, 1, numStr, 2);    // Runtime minutes
+                lcd_write_string(numStr);
+                lcd_write_byte(':', 1);
+                intToString((runtime/10)%60, 1, numStr, 2);        // Runtime seconds
+                lcd_write_string(numStr);
+                lcd_write_string(" ");
+
+                // Mini graph
+                lcd_cursor(1,8);
+                for(j=0; j<7; j++){
+                    lcd_write_byte(j, 1);
+                }
+
+                // Battery State
+                lcd_cursor(1,15);
+                lcd_write_byte(7, 1);       // Battery symbol (0x00:Empty to 0x06:Full)
+                break;
+            
+            case 1:     // Session max screen
+                lcd_cursor(0,0);
+                lcd_write_string("Session Maximum ");
+                lcd_cursor(1,0);
+                intToString(sessionHigh, 1, numStr, 1);
+                lcd_write_string(numStr);
+                lcd_write_string("CPM ");
+                intToString(sessionHigh*CPM_uS_SCALE, 1, numStr, 1);
+                lcd_write_string(numStr);
+                lcd_write_byte(0xE4, 1);
+                lcd_write_string("S/h      ");
+                break;
+                
+            case 2:     // Alltime max screen
+                lcd_cursor(0,0);
+                lcd_write_string("All-Time Maximum");
+                lcd_cursor(1,0);
+                intToString(alltimeHigh, 1, numStr, 1);
+                lcd_write_string(numStr);
+                lcd_write_string("CPM ");
+                intToString(alltimeHigh*CPM_uS_SCALE, 1, numStr, 1);
+                lcd_write_string(numStr);
+                lcd_write_byte(0xE4, 1);
+                lcd_write_string("S/h      ");
+                break;
+        } 
                    
         __delay_ms(50);             // Slow down display update to prevent flicker
         
@@ -382,7 +407,7 @@ void __interrupt() isr(void)
         
     } else if (TMR1IE && TMR1IF) {
         // Timer1 is the 0.1s main time base
-        _100ms++;
+        runtime++;
         
         if(PORTB & 0b10000000){     // Every 100ms we get closer to a good button register. If IOC detects the pin go low, btn is reset
             if(btn < 254){          // 255 is the 'latched' value, meaning the main code doesnt want to process the button further
@@ -555,6 +580,23 @@ void lcd_clear(){
     return;
 }
 
+void clear_graph(){
+    
+    char j;
+    // Clear the CGRAM where the graph is stored
+    lcd_write_byte(0x40, 0);    // GCRAM 0-6
+    for(j=0; j<8; j++){
+        lcd_write_byte(0x0, 1); 
+        lcd_write_byte(0x0, 1);
+        lcd_write_byte(0x0, 1);
+        lcd_write_byte(0x0, 1);
+        lcd_write_byte(0x0, 1);
+        lcd_write_byte(0x0, 1);
+        lcd_write_byte(0x0, 1);
+        lcd_write_byte(0x0, 1);
+    }
+}
+
 void lcd_write_string(char *stringArray){
     
     while (*stringArray){
@@ -579,7 +621,8 @@ char numDigits(unsigned short num) {
 }
 
 // Convert long to null terminated string. When divisor=1, you get exactly what you put in, eg 123 -> "123\0". Divisor=1000: 12345 -> "12.345\0"
-char intToString(unsigned short number, unsigned short divisor, char* dest) {
+// fixedWidth should be 1 for normal, or the total whole digits if zero padding is required. eg: fixedWidth=2 would give 0-> 00, 5-> 05 32->32. 
+char intToString(unsigned short number, unsigned short divisor, char* dest, char fixedWidth) {
     char i, k;  
     char j=0;   //1=has decimal point
     char digits_decimal, digits_whole;
@@ -596,27 +639,30 @@ char intToString(unsigned short number, unsigned short divisor, char* dest) {
         k = 0;              // Leading 0 not required
         digits_decimal = numDigits(number) - digits_whole;
     }
-
+    
     if (number == 0) {
         dest[0] = '0';
-        dest[1] = '\0';
-        return 1;
-    } else {
-        for (i = 0; i < digits_decimal; i++) {
-            dest[digits_whole+digits_decimal - i +k] = (number % 10) + 48;
-            number = number / 10;
-        }
-        if(digits_decimal != 0){        // choose to print decimal place
-            dest[digits_whole+k] = '.';
-            j=1;    // yes decimal
-        }
-                                                // Add decimal pt and print the decimals
-        for (i = 0; i < digits_whole+k; i++) {    
-            dest[digits_whole - i - 1 + k] = (number % 10) + 48;
-            number = number / 10;
-        }
-        dest[digits_whole+digits_decimal + j + k] = '\0';
+        fixedWidth--;   // k is 1 instead of 0 so decrement
     }
+    
+    if(fixedWidth > digits_whole){     // Caller wants more leading digits than the number intrinsically has
+        k = k + fixedWidth - digits_whole;  // Offset the start of the string by this many bytes which are pre-filled to ASCII 0
+    }
+
+    for (i = 0; i < digits_decimal; i++) {
+        dest[digits_whole+digits_decimal +k -i] = (number % 10) + 48;
+        number = number / 10;
+    }
+    if(digits_decimal != 0){        // choose to print decimal place
+        dest[digits_whole+k] = '.';
+        j=1;    // yes decimal
+    }
+                                            // Add decimal pt and print the decimals
+    for (i = 0; i < digits_whole+k; i++) {    
+        dest[digits_whole +k -i -1] = (number % 10) + 48;
+        number = number / 10;
+    }
+    dest[digits_whole+digits_decimal + j + k] = '\0';
 
     return digits_whole+digits_decimal + j + k;  
 }

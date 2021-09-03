@@ -52,6 +52,9 @@
 #define LCD_DB7             PORTBbits.RB4  // B4 LCD 7 Pin
 #define LCD_DELAY           5       // General delay between commands. 1us works, 40us as long as you'd ever need
 
+#define EEWRITE_TIMEOUT     100     // x10us 
+#define ALLTIMEMAX_EEADDR   0       // EEPROM address of alltime max, MSByte, LSByte is +1 from this
+
 #define TARGET_HVFB         689     // 6M6/56k divider so (5* TARGET_HVFB/1023) / (56k / (56k+6M6)) eg 689 counts = 400V
 #define HV_DUTY_MAX         255     // 100% duty = PR2<<2 value. eg 224/(80<<2) = 70%
 #define DEFAULT_PID_P       10      // Divided factor
@@ -100,6 +103,9 @@ void lcd_cursor(char row, char column);
 void lcd_write_byte(char byteIn, char RS);
 void lcd_write_nibble(char byteIn, char RS);
 void lcd_write_string(char *stringArray);
+
+void EEPROM_write(char data, unsigned short addr);
+char EEPROM_read(unsigned short addr);
 
 void clear_graph();
 char numDigits(unsigned short num);
@@ -151,13 +157,21 @@ void main(void) {
     char graphBlock = 0;
     char displayState = 0;  // 0: normal screen. 1: session max. 2: alltime max
     unsigned short sessionHigh = 0;
-    unsigned short alltimeHigh = 0;
+    unsigned short alltimeHigh;
     
     for(j=0; j<HV_DUTY_MAX; j++){     // Show welcome screen for 1s and also ramp up HV
         __delay_ms(1000/HV_DUTY_MAX);
         HV_Startup_Duty++;
     }
     HV_Startup_Duty = HV_DUTY_MAX;
+    
+    alltimeHigh  = EEPROM_read(ALLTIMEMAX_EEADDR) << 8;
+    alltimeHigh |= EEPROM_read(ALLTIMEMAX_EEADDR +1);
+    
+    if(alltimeHigh == 0xFFFF){
+        // EEPROM is empty (all Fs) so ensure a new value is written by means of setting the max to be 0
+        alltimeHigh = 0;
+    }
     
     lcd_clear();
     
@@ -172,7 +186,12 @@ void main(void) {
             counts = 0;     // new time 'block'
             if (cpm > sessionHigh){
                 sessionHigh = cpm;  // new session maximum
-                // TODO: cehck for alltime maximum
+                if(sessionHigh > alltimeHigh){
+                    // New all-time high, save to EEPROM
+                    alltimeHigh = sessionHigh;
+                    EEPROM_write((char)((alltimeHigh & 0xFF00) >> 8), ALLTIMEMAX_EEADDR);
+                    EEPROM_write((char)((alltimeHigh & 0xFF)), ALLTIMEMAX_EEADDR);
+                }
             }
             
             
@@ -205,7 +224,7 @@ void main(void) {
             graphBlock++;
             
             if(graphBlock > 7*5){                   // 7 blocks of 5 dots wide
-                for(block=0; block<7; block++){     // Left shift the graph by one block
+                for(block=0; block<6; block++){     // Left shift the graph by one block
                     for(x=0; x<8; x++){
                         dotArray[x][block] = dotArray[x][block+1];
                     }
@@ -665,4 +684,47 @@ char intToString(unsigned short number, unsigned short divisor, char* dest, char
     dest[digits_whole+digits_decimal + j + k] = '\0';
 
     return digits_whole+digits_decimal + j + k;  
+}
+
+void EEPROM_write(char data, unsigned short addr) {
+    char timeout = 0;
+    
+    // Check for any writes in progress
+    if(EECON1 & 0x02 && timeout < EEWRITE_TIMEOUT){
+        timeout++;
+        __delay_us(10);
+    }
+    if(timeout > EEWRITE_TIMEOUT){
+        // Note: EECON1 & 0b00001000 is the write error bit
+        return; // Timed out waiting for existing EEPROM write to finish
+    }
+    
+    EECON1 = 0b00000100;    // Write enabled 
+    EEADR  = (char) (addr & 0xFF);
+    EEADRH = (char)((addr & 0xF00) >> 8);
+    
+    // Disable interrupts 
+    INTCON &= 0b01111111;
+            
+    // Unlock sequence
+    EECON2 = 0xAA;
+    EECON2 = 0x55;
+    
+    EECON1 |= 0b00000010;    // Write the data 
+    
+    // Enable interrupts 
+    INTCON |= 0b10000000;
+    return;
+}
+
+char EEPROM_read(unsigned short addr) {
+    
+    EECON1 = 0x00;                  
+    EEADR  = (char) (addr & 0xFF);
+    EEADRH = (char)((addr & 0xF00) >> 8);
+    
+    EECON1 |= 0b00000001;   // Set RD bit to start read
+    
+    return EEDATA;          // Data is available immediately
+
 }

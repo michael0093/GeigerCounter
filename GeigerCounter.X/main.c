@@ -52,7 +52,7 @@
 #define LCD_DB7             PORTBbits.RB4  // B4 LCD 7 Pin
 #define LCD_DELAY           5       // General delay between commands. 1us works, 40us as long as you'd ever need
 
-#define EEWRITE_TIMEOUT     100     // x10us 
+#define EEWRITE_TIMEOUT     8       // x1ms
 #define ALLTIMEMAX_EEADDR   0       // EEPROM address of alltime max, MSByte, LSByte is +1 from this
 
 #define TARGET_HVFB         689     // 6M6/56k divider so (5* TARGET_HVFB/1023) / (56k / (56k+6M6)) eg 689 counts = 400V
@@ -69,6 +69,7 @@
 #define CPM_uS_SCALE        50       // multiply CPM by this to get uS/hr
 
 #define BTN_PRESS_100ms     2       // Number of 0.1s before registering button press. "2" could be as short as 100ms and as long as 200ms
+#define BTN_HOLD_100ms      20      // Number of 0.1s before registering button long-press. Max = 25
 
 //    A0(an)	HVFB
 //    A1(an)	Vbatt
@@ -91,8 +92,9 @@ volatile char btn = 0;
 volatile unsigned short vbatt   = 0;
 volatile unsigned short hvfb    = 0;
 volatile unsigned short counts  = 0;
+volatile unsigned long runtime  = 0;        // in 100ms increments
 unsigned short cpm              = 0;
-volatile unsigned long runtime  = 0;     // in 100ms increments
+volatile char displayState      = 0;        // 0: normal screen. 1: session max. 2: alltime max
 
 char HV_Startup_Duty = 0;
 
@@ -104,8 +106,8 @@ void lcd_write_byte(char byteIn, char RS);
 void lcd_write_nibble(char byteIn, char RS);
 void lcd_write_string(char *stringArray);
 
-void EEPROM_write(char data, unsigned short addr);
-char EEPROM_read(unsigned short addr);
+void EEPROM_write(char data, char addr);
+char EEPROM_read(char addr);
 
 void clear_graph();
 char numDigits(unsigned short num);
@@ -148,14 +150,13 @@ void main(void) {
     // Welcome screen with version
     lcd_init();
     lcd_write_string(" GEIGER COUNTER");
-    lcd_cursor(1,6);
-    lcd_write_string("V0.1");
+    lcd_cursor(1,5);
+    lcd_write_string("V0.2");
         
     clear_graph();
     
     char j;
     char graphBlock = 0;
-    char displayState = 0;  // 0: normal screen. 1: session max. 2: alltime max
     unsigned short sessionHigh = 0;
     unsigned short alltimeHigh;
     
@@ -165,7 +166,8 @@ void main(void) {
     }
     HV_Startup_Duty = HV_DUTY_MAX;
     
-    alltimeHigh  = EEPROM_read(ALLTIMEMAX_EEADDR) << 8;
+    alltimeHigh  = EEPROM_read(ALLTIMEMAX_EEADDR);
+    alltimeHigh  = alltimeHigh << 8;
     alltimeHigh |= EEPROM_read(ALLTIMEMAX_EEADDR +1);
     
     if(alltimeHigh == 0xFFFF){
@@ -189,8 +191,8 @@ void main(void) {
                 if(sessionHigh > alltimeHigh){
                     // New all-time high, save to EEPROM
                     alltimeHigh = sessionHigh;
-                    EEPROM_write((char)((alltimeHigh & 0xFF00) >> 8), ALLTIMEMAX_EEADDR);
-                    EEPROM_write((char)((alltimeHigh & 0xFF)), ALLTIMEMAX_EEADDR);
+                    EEPROM_write( (char)((alltimeHigh & 0xFF00) >> 8), ALLTIMEMAX_EEADDR );
+                    EEPROM_write( (char)((alltimeHigh & 0xFF)),        ALLTIMEMAX_EEADDR+1 );
                 }
             }
             
@@ -321,16 +323,28 @@ void main(void) {
             }
 
         }
-                
-        if(btn > BTN_PRESS_100ms && btn != 255){
-            btn = 255;  // Don't keep re-triggering until release
-            if(displayState < 2){
-                displayState++;
-            } else {
-                displayState = 0;
+        
+        // Button short press is handled in interrupt, holds are done here
+        if(btn > BTN_HOLD_100ms && btn != 255){
+            btn = 255;  // Won't re-trigger until button release
+            
+            switch (displayState){
+                case 0:     // Normal counter screen, reset runtime
+                    runtime = 0;
+                    break;
+                    
+                case 1:     // Reset session maximum
+                    sessionHigh = 0;
+                    break;
+                    
+                case 2:     // Reset alltime maximum
+                    alltimeHigh = 0;
+                    EEPROM_write(0, ALLTIMEMAX_EEADDR);
+                    EEPROM_write(0, ALLTIMEMAX_EEADDR+1);
+                    break;
             }
         }
-        
+           
         switch (displayState){
             
             default:
@@ -439,7 +453,6 @@ void __interrupt() isr(void)
         TMR1IF = 0;
                 
     } else if (ADIE && ADIF){
-//        PORTB |= 0b01000000;
         // ADC conversion complete, update the boost PWM control loop
         if (ADCON0 & 0b00000100){
             // Unexpected conversion is still running, abort it and come next time
@@ -485,7 +498,6 @@ void __interrupt() isr(void)
                 asm("CLRWDT");  // Clear 2.048ms watchdog timer
             }
         }
-//        PORTB &= ~0b01000000;
         ADIF = 0;
         
     } else if (RBIE && RBIF){
@@ -497,6 +509,14 @@ void __interrupt() isr(void)
             }
         }
         if(!(PORTB & 0b10000000)){  // Every 100ms we get closer to a good button register. If IOC detects the pin go low, btn is reset
+            // Check if this release constitutes a button press event
+            if(btn > BTN_PRESS_100ms && btn != 255){
+                if(displayState < 2){
+                    displayState++;
+                } else {
+                    displayState = 0;
+                }
+            }
             btn = 0;
         }
         
@@ -686,42 +706,44 @@ char intToString(unsigned short number, unsigned short divisor, char* dest, char
     return digits_whole+digits_decimal + j + k;  
 }
 
-void EEPROM_write(char data, unsigned short addr) {
+void EEPROM_write(char data, char addr) {
     char timeout = 0;
     
     // Check for any writes in progress
-    if(EECON1 & 0x02 && timeout < EEWRITE_TIMEOUT){
+    while((EECON1 & 0x02) && (timeout < EEWRITE_TIMEOUT)){
         timeout++;
-        __delay_us(10);
+        __delay_ms(1);
     }
-    if(timeout > EEWRITE_TIMEOUT){
+    if(timeout >= EEWRITE_TIMEOUT){
         // Note: EECON1 & 0b00001000 is the write error bit
+        PORTB |= 0b01000000;
         return; // Timed out waiting for existing EEPROM write to finish
     }
     
-    EECON1 = 0b00000100;    // Write enabled 
-    EEADR  = (char) (addr & 0xFF);
-    EEADRH = (char)((addr & 0xF00) >> 8);
+    EEADR  = addr;
+    EEDATA = data;
+    EECON1 = 0b00000100;    // Write enabled, WREN bit
     
     // Disable interrupts 
     INTCON &= 0b01111111;
             
     // Unlock sequence
-    EECON2 = 0xAA;
     EECON2 = 0x55;
+    EECON2 = 0xAA;
     
     EECON1 |= 0b00000010;    // Write the data 
     
     // Enable interrupts 
     INTCON |= 0b10000000;
+    EECON1  = 0x0;          // Disable writes
+
     return;
 }
 
-char EEPROM_read(unsigned short addr) {
+char EEPROM_read(char addr) {
     
-    EECON1 = 0x00;                  
-    EEADR  = (char) (addr & 0xFF);
-    EEADRH = (char)((addr & 0xF00) >> 8);
+    EECON1 = 0x00;
+    EEADR  = addr;
     
     EECON1 |= 0b00000001;   // Set RD bit to start read
     

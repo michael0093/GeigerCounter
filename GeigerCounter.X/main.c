@@ -46,20 +46,25 @@
 
 #define LCD_RS              PORTAbits.RA6  // RA6 LCD RS Pin
 #define LCD_E               PORTAbits.RA7  // RA7 LCD E Pin
-#define LCD_DB4             PORTBbits.RB1  // RB1 LCD 4 Pin
-#define LCD_DB5             PORTBbits.RB2  // RB2 LCD 5 Pin
-#define LCD_DB6             PORTBbits.RB3  // RB3 LCD 6 Pin
-#define LCD_DB7             PORTBbits.RB4  // B4 LCD 7 Pin
+#define LCD_DB4             PORTBbits.RB4  // RB4 LCD 4 Pin
+#define LCD_DB5             PORTBbits.RB3  // RB3 LCD 5 Pin
+#define LCD_DB6             PORTBbits.RB2  // RB2 LCD 6 Pin
+#define LCD_DB7             PORTBbits.RB1  // RB1 LCD 7 Pin
 #define LCD_DELAY           5       // General delay between commands. 1us works, 40us as long as you'd ever need
 
 #define EEWRITE_TIMEOUT     8       // x1ms
 #define ALLTIMEMAX_EEADDR   0       // EEPROM address of alltime max, MSByte, LSByte is +1 from this
 
 #define TARGET_HVFB         689     // 6M6/56k divider so (5* TARGET_HVFB/1023) / (56k / (56k+6M6)) eg 689 counts = 400V
-#define HV_DUTY_MAX         255     // 100% duty = PR2<<2 value. eg 224/(80<<2) = 70%
+#define CURRERROR_LIMIT     35      // +/- this from target above causes error
+#define ERR_ACCUMTIME       50      // Main loop cycles before system stop due to HV error
+#define ERR_ACCUMDUTY       200     // Int loop cycles before system stop due to HV duty error
+#define HV_DUTY_MAX         180     // 100% duty = PR2<<2 value. eg 224/(80<<2) = 70%. typ=150
 #define DEFAULT_PID_P       10      // Divided factor
 #define DEFAULT_PID_D       0       // Multiplied factor       
 
+#define CPM_uSV             632    
+#define CPM_uSV_DIV         100000  // uSv/h = CPM * CPM_uSV / CPM_uSV_
 #define CPM_MAX             9999
 #define COUNT_TIME          100     // x0.1s CPM calculation time window (update rate)
 #define BATT_TIME           5       // x0.1s Battery symbol update rate
@@ -92,9 +97,16 @@ volatile char btn = 0;
 volatile unsigned short vbatt   = 0;
 volatile unsigned short hvfb    = 0;
 volatile unsigned short counts  = 0;
+volatile unsigned short newCnt  = 0;        // =1 when count has increased
 volatile unsigned long runtime  = 0;        // in 100ms increments
+volatile unsigned char errDuty  = 0;
+volatile unsigned char errOver  = 0;
+volatile unsigned char errUndr  = 0;
 unsigned short cpm              = 0;
+unsigned long usv               = 0;
 volatile char displayState      = 0;        // 0: normal screen. 1: session max. 2: alltime max
+
+//volatile char dbg = 0;
 
 char HV_Startup_Duty = 0;
 
@@ -160,11 +172,14 @@ void main(void) {
     unsigned short sessionHigh = 0;
     unsigned short alltimeHigh;
     
-    for(j=0; j<HV_DUTY_MAX; j++){     // Show welcome screen for 1s and also ramp up HV
-        __delay_ms(1000/HV_DUTY_MAX);
+    PORTB |= 0b01000000;    // LED/buzzer on 
+
+    for(j=0; j<HV_DUTY_MAX; j++){     // Show welcome screen for 0.5s and also ramp up HV
+        __delay_ms(500/HV_DUTY_MAX);
         HV_Startup_Duty++;
     }
     HV_Startup_Duty = HV_DUTY_MAX;
+    PORTB &= ~0b01000000;       // LED/buzzer off 
     
     alltimeHigh  = EEPROM_read(ALLTIMEMAX_EEADDR);
     alltimeHigh  = alltimeHigh << 8;
@@ -185,6 +200,8 @@ void main(void) {
             
             // Update CPM and the alltime/session maximums
             cpm = counts * COUNT_TIME_MULT;
+            usv = cpm * CPM_uSV;            // Still has to be divided by CPM_uSV_DIV to get uSv/h
+            
             counts = 0;     // new time 'block'
             if (cpm > sessionHigh){
                 sessionHigh = cpm;  // new session maximum
@@ -355,9 +372,22 @@ void main(void) {
                 lcd_write_string(numStr);
                 lcd_write_string("CPM ");
                 intToString(counts, 1, numStr, 1);
+                //intToString(usv, CPM_uSV_DIV, numStr, 0);
                 lcd_write_string(numStr);
                 lcd_write_byte(0xE4, 1);
                 lcd_write_string("S/h      ");
+                
+                // Integer debugs
+//                lcd_cursor(0,0);
+//                intToString(hvfb, 1, numStr, 1);
+//                lcd_write_string(numStr);
+//                lcd_write_string(" ");
+//                intToString(errUndr, 1, numStr, 1);
+//                lcd_write_string(numStr);
+//                lcd_write_string(" ");
+//                intToString(errOver, 1, numStr, 1);
+//                lcd_write_string(numStr);
+//                lcd_write_string("                ");
 
                 // Run Timer
                 lcd_cursor(1,0);
@@ -408,9 +438,66 @@ void main(void) {
                 lcd_write_string("S/h      ");
                 break;
         } 
-                   
-        __delay_ms(50);             // Slow down display update to prevent flicker
         
+        // Check for hardware errors
+        if(hvfb > (TARGET_HVFB+CURRERROR_LIMIT) && HV_Startup_Duty == HV_DUTY_MAX){
+            errOver++;
+        } else if(hvfb < (TARGET_HVFB-CURRERROR_LIMIT) && HV_Startup_Duty == HV_DUTY_MAX){
+            errUndr++;
+        } else {
+            if(errUndr > 0){
+                errUndr--;
+            }
+            if(errOver > 0){
+                errOver--;
+            }
+        }
+        
+        if(errDuty > ERR_ACCUMDUTY){
+            CCP1CON = 0;
+            CCPR1L  = 0;
+            lcd_clear();
+            lcd_cursor(0,0);
+            lcd_write_string("HV DUTY ERR");
+            
+            INTCON = 0;   // Disable interrupts 
+            while(1){
+                asm("CLRWDT");  // Clear 2.048ms watchdog timer
+            }
+        }
+        if(errOver > ERR_ACCUMTIME){
+            CCP1CON = 0;
+            CCPR1L  = 0;
+            lcd_clear();
+            lcd_cursor(0,0);
+            lcd_write_string("HI HV ERR");
+            
+            INTCON = 0;   // Disable interrupts 
+            while(1){
+                asm("CLRWDT");  // Clear 2.048ms watchdog timer
+            }
+        }
+        if(errUndr > ERR_ACCUMTIME){
+            CCP1CON = 0;
+            CCPR1L  = 0;
+            lcd_clear();
+            lcd_cursor(0,0);
+            lcd_write_string("LOW HV ERR");
+            
+            INTCON = 0;   // Disable interrupts 
+            while(1){
+                asm("CLRWDT");  // Clear 2.048ms watchdog timer
+            }
+        }
+        
+        // If the count changed, pulse the LED/buzzer
+        if(newCnt){
+            PORTB |= 0b01000000;    // LED/buzzer on 
+            newCnt = 0;
+        }           
+        __delay_ms(10);             // Slow down display update to prevent flicker
+        PORTB &= ~0b01000000;       // LED/buzzer off 
+        __delay_ms(10);             // Slow down display update to prevent flicker
     }
     return;
 }
@@ -418,8 +505,8 @@ void main(void) {
 void __interrupt() isr(void)
 {
     static signed short duty = 0;
-    static signed short currError = 0;
     static signed short prevError = 0;
+    static signed short currError = 0;
 //    static signed short integral  = 0;
     
     if (TMR0IE && TMR0IF) {
@@ -478,12 +565,13 @@ void __interrupt() isr(void)
                 //currError = currError / (signed short)(vbatt);
 
                 duty = duty + (currError/8) + ((currError-prevError)/1);
-
+                
                 if(duty < 0){    // HV disabled or some issue with duty calculation
                     duty = 0;
 
                 } else if (duty > HV_DUTY_MAX){         // Under normal operation the duty is limited to about 70%
                     duty = HV_DUTY_MAX;
+                    errDuty++;
 
                 } else if (duty > HV_Startup_Duty){     // During startup, duty is further limited to reduce in-rush current
                     duty = HV_Startup_Duty;             // Final value of HV_Startup_Duty may be greater than HV_DUTY_MAX so check last
@@ -503,10 +591,11 @@ void __interrupt() isr(void)
     } else if (RBIE && RBIF){
         // PortB change handles tube input
                 
-        if(PORTB & 0b00100000){     // Tube pulse detected
+        if(!(PORTB & 0b00100000)){     // Tube pulse detected
             if( counts < COUNTS_MAX) {
                 counts++;
             }
+            newCnt = 1;             // Tell main to pulse LED/Buzzer
         }
         if(!(PORTB & 0b10000000)){  // Every 100ms we get closer to a good button register. If IOC detects the pin go low, btn is reset
             // Check if this release constitutes a button press event

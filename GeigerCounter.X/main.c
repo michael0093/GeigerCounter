@@ -66,11 +66,14 @@
 #define CPM_uSV             632    
 #define CPM_uSV_DIV         100000  // uSv/h = CPM * CPM_uSV / CPM_uSV_
 #define CPM_MAX             9999
-#define COUNT_TIME          100     // x0.1s CPM calculation time window (update rate)
+#define FAST_COUNT_TIME     100     // x0.1s CPM calculation time window (update rate)
+#define SLOW_COUNT_TIME     600     // x0.1s CPM calculation time window (update rate)
 #define BATT_TIME           5       // x0.1s Battery symbol update rate
 
-#define COUNT_TIME_MULT     (600/COUNT_TIME)            // Multiply the counts within the COUNT_TIME to get CPM. 600 = 60sec in 0.1s
-#define COUNTS_MAX          (CPM_MAX/COUNT_TIME_MULT)   // Stop counting after this many within the COUNT_TIME
+#define FAST_COUNT_TIME_MULT (600/FAST_COUNT_TIME)            // Multiply the counts within the COUNT_TIME to get CPM. 600 = 60sec in 0.1s
+#define SLOW_COUNT_TIME_MULT 1            // Multiply the counts within the COUNT_TIME to get CPM. 600 = 60sec in 0.1s
+#define FAST_COUNTS_MAX      (CPM_MAX/FAST_COUNT_TIME_MULT)   // Stop counting after this many within the COUNT_TIME
+#define SLOW_COUNTS_MAX      (CPM_MAX/SLOW_COUNT_TIME_MULT)   // Stop counting after this many within the COUNT_TIME
 #define CPM_uS_SCALE        50       // multiply CPM by this to get uS/hr
 
 #define BTN_PRESS_100ms     2       // Number of 0.1s before registering button press. "2" could be as short as 100ms and as long as 200ms
@@ -109,6 +112,7 @@ volatile char displayState      = 0;        // 0: normal screen. 1: session max.
 //volatile char dbg = 0;
 
 char HV_Startup_Duty = 0;
+uint16_t count_max;
 
 void nop_delay(volatile unsigned short nops);
 void lcd_init();
@@ -128,6 +132,7 @@ char intToString(unsigned short number, unsigned short divisor, char* dest, char
 void main(void) {
     
     char numStr[6];
+    char fastmode = 0;
     
     // Peripheral Setup
     OSCCON = 0b01111100;    // 8MHz internal osc  
@@ -163,7 +168,7 @@ void main(void) {
     lcd_init();
     lcd_write_string(" GEIGER COUNTER");
     lcd_cursor(1,5);
-    lcd_write_string("V0.2");
+    lcd_write_string("V0.3");
         
     clear_graph();
     
@@ -173,6 +178,7 @@ void main(void) {
     unsigned short alltimeHigh;
     
     PORTB |= 0b01000000;    // LED/buzzer on 
+    fastmode = PORTB;       // PORTB 0x80 is the button state we want to store
 
     for(j=0; j<HV_DUTY_MAX; j++){     // Show welcome screen for 0.5s and also ramp up HV
         __delay_ms(500/HV_DUTY_MAX);
@@ -180,6 +186,7 @@ void main(void) {
     }
     HV_Startup_Duty = HV_DUTY_MAX;
     PORTB &= ~0b01000000;       // LED/buzzer off 
+    fastmode &= PORTB;          // if button was held during startup fastmode&0b10000000 will be true
     
     alltimeHigh  = EEPROM_read(ALLTIMEMAX_EEADDR);
     alltimeHigh  = alltimeHigh << 8;
@@ -192,14 +199,28 @@ void main(void) {
     
     lcd_clear();
     
+    uint16_t count_time;
+    uint8_t  count_mult;
+            
+    if(fastmode & 0b10000000){
+        count_time = FAST_COUNT_TIME;
+        count_mult = FAST_COUNT_TIME_MULT;
+        count_max  = FAST_COUNTS_MAX;
+        
+    } else {
+        count_time = SLOW_COUNT_TIME;
+        count_mult = SLOW_COUNT_TIME_MULT;
+        count_max  = SLOW_COUNTS_MAX;
+    }
+    
     runtime = 0;    // Reset runtime counter just before start so that battery icon gets shown immediately
             
     while(1){
         
-        if(runtime % COUNT_TIME == 0){   // It is a multiple of the count time
+        if(runtime % count_time == 0){   // It is a multiple of the count time
             
             // Update CPM and the alltime/session maximums
-            cpm = counts * COUNT_TIME_MULT;
+            cpm = counts * count_mult;
             usv = cpm * CPM_uSV;            // Still has to be divided by CPM_uSV_DIV to get uSv/h
             
             counts = 0;     // new time 'block'
@@ -213,7 +234,7 @@ void main(void) {
                 }
             }
             
-            
+            /*
             // Update the graph
             char x, block;
             unsigned short gY;
@@ -254,7 +275,7 @@ void main(void) {
                 
                 graphBlock = graphBlock-5;          // Graph pointer to start of the last block which is now blank
             }
-            
+            */
             // Update the battery status
             lcd_write_byte(0x78, 0);    // CGRAM position 7, battery symbol
             if(vbatt >= VBATT_6of6){
@@ -592,7 +613,7 @@ void __interrupt() isr(void)
         // PortB change handles tube input
                 
         if(!(PORTB & 0b00100000)){     // Tube pulse detected
-            if( counts < COUNTS_MAX) {
+            if( counts < count_max) {
                 counts++;
             }
             newCnt = 1;             // Tell main to pulse LED/Buzzer

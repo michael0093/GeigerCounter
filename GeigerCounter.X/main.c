@@ -63,7 +63,8 @@
 #define DEFAULT_PID_P       10      // Divided factor
 #define DEFAULT_PID_D       0       // Multiplied factor       
 
-#define CPM_uSV             632    
+#define uSV_DECIMALS        3       // Show uSV conversion to this many decimal places
+#define CPM_uSV             700//632    
 #define CPM_uSV_DIV         100000  // uSv/h = CPM * CPM_uSV / CPM_uSV_
 #define CPM_MAX             9999
 #define FAST_COUNT_TIME     100     // x0.1s CPM calculation time window (update rate)
@@ -74,7 +75,7 @@
 #define SLOW_COUNT_TIME_MULT 1            // Multiply the counts within the COUNT_TIME to get CPM. 600 = 60sec in 0.1s
 #define FAST_COUNTS_MAX      (CPM_MAX/FAST_COUNT_TIME_MULT)   // Stop counting after this many within the COUNT_TIME
 #define SLOW_COUNTS_MAX      (CPM_MAX/SLOW_COUNT_TIME_MULT)   // Stop counting after this many within the COUNT_TIME
-#define CPM_uS_SCALE        50       // multiply CPM by this to get uS/hr
+//#define CPM_uS_SCALE        50       // multiply CPM by this to get uS/hr
 
 #define BTN_PRESS_100ms     2       // Number of 0.1s before registering button press. "2" could be as short as 100ms and as long as 200ms
 #define BTN_HOLD_100ms      20      // Number of 0.1s before registering button long-press. Max = 25
@@ -125,13 +126,13 @@ void lcd_write_string(char *stringArray);
 void EEPROM_write(char data, char addr);
 char EEPROM_read(char addr);
 
-void clear_graph();
-char numDigits(unsigned short num);
-char intToString(unsigned short number, unsigned short divisor, char* dest, char fixedWidth);    // Convert long to null terminated string. When divisor=1, you get exactly what you put in
+//void clear_graph();
+char numDigits(unsigned long num);
+char intToString(unsigned long number, unsigned long divisor, char* dest, char fixedWidth, char reduceDecimals);    // Convert long to null terminated string. When divisor=1, you get exactly what you put in
 
 void main(void) {
     
-    char numStr[6];
+    char numStr[8];
     char fastmode = 0;
     
     // Peripheral Setup
@@ -170,11 +171,13 @@ void main(void) {
     lcd_cursor(1,5);
     lcd_write_string("V0.3");
         
-    clear_graph();
+//    clear_graph();
     
     char j;
-    char graphBlock = 0;
+//    char graphBlock = 0;
     unsigned short sessionHigh = 0;
+    unsigned long  sessionSum  = 0;
+    unsigned short sessionTime = 0;
     unsigned short alltimeHigh;
     
     PORTB |= 0b01000000;    // LED/buzzer on 
@@ -201,6 +204,7 @@ void main(void) {
     
     uint16_t count_time;
     uint8_t  count_mult;
+    uint8_t  calcFlag = 1;
             
     if(fastmode & 0b10000000){
         count_time = FAST_COUNT_TIME;
@@ -219,147 +223,156 @@ void main(void) {
         
         if(runtime % count_time == 0){   // It is a multiple of the count time
             
-            // Update CPM and the alltime/session maximums
-            cpm = counts * count_mult;
-            usv = cpm * CPM_uSV;            // Still has to be divided by CPM_uSV_DIV to get uSv/h
-            
-            counts = 0;     // new time 'block'
-            if (cpm > sessionHigh){
-                sessionHigh = cpm;  // new session maximum
-                if(sessionHigh > alltimeHigh){
-                    // New all-time high, save to EEPROM
-                    alltimeHigh = sessionHigh;
-                    EEPROM_write( (char)((alltimeHigh & 0xFF00) >> 8), ALLTIMEMAX_EEADDR );
-                    EEPROM_write( (char)((alltimeHigh & 0xFF)),        ALLTIMEMAX_EEADDR+1 );
-                }
-            }
-            
-            /*
-            // Update the graph
-            char x, block;
-            unsigned short gY;
-            static char dotArray[8][7] = {{0}};
-            
-            gY = cpm*8;
-            gY = gY / sessionHigh;
-            
-//            dotArray[gY][graphBlock/5] |= 1 << (4-(graphBlock%5));
-            dotArray[0][0] = 1;
-            dotArray[1][0] = 2;
-            dotArray[2][0] = 3;
-            dotArray[3][0] = 4;
-            dotArray[4][0] = 5;
-            dotArray[5][0] = 6;
-            dotArray[6][0] = 7;
-            dotArray[7][0] = 8;
-                    
-            lcd_write_byte(0x40, 0);    // Start at CGRAM position 0, fills 0-6
-         
-            for(block=0; block<7; block++){
-                for (x=0; x<8; x++){
-                    lcd_write_byte(dotArray[7-x][block], 1);
-                } 
-            }
-            // Display is updated immediately when CGRAM changes
-            graphBlock++;
-            
-            if(graphBlock > 7*5){                   // 7 blocks of 5 dots wide
-                for(block=0; block<6; block++){     // Left shift the graph by one block
-                    for(x=0; x<8; x++){
-                        dotArray[x][block] = dotArray[x][block+1];
-                    }
-                }
-                for(x=0; x<8; x++){                 // Clear the last block ready for new data
-                    dotArray[x][7] = 0;
-                }
+            if(calcFlag == 1){    // Only do this once per matching runtime value
+                calcFlag = 0;
                 
-                graphBlock = graphBlock-5;          // Graph pointer to start of the last block which is now blank
+                // Update CPM and the alltime/session maximums
+                cpm = counts * count_mult;
+                usv = cpm * CPM_uSV;            // Still has to be divided by CPM_uSV_DIV to get uSv/h
+
+                sessionSum = sessionSum + cpm;
+                sessionTime++;
+                
+                counts = 0;     // new time 'block'
+                if (cpm > sessionHigh){
+                    sessionHigh = cpm;  // new session maximum
+//                    if(sessionHigh > alltimeHigh){
+//                        // New all-time high, save to EEPROM
+//                        alltimeHigh = sessionHigh;
+//                        EEPROM_write( (char)((alltimeHigh & 0xFF00) >> 8), ALLTIMEMAX_EEADDR );
+//                        EEPROM_write( (char)((alltimeHigh & 0xFF)),        ALLTIMEMAX_EEADDR+1 );
+//                    }
+                }
+
+                /*
+                // Update the graph
+                char x, block;
+                unsigned short gY;
+                static char dotArray[8][7] = {{0}};
+
+                gY = cpm*8;
+                gY = gY / sessionHigh;
+
+    //            dotArray[gY][graphBlock/5] |= 1 << (4-(graphBlock%5));
+                dotArray[0][0] = 1;
+                dotArray[1][0] = 2;
+                dotArray[2][0] = 3;
+                dotArray[3][0] = 4;
+                dotArray[4][0] = 5;
+                dotArray[5][0] = 6;
+                dotArray[6][0] = 7;
+                dotArray[7][0] = 8;
+
+                lcd_write_byte(0x40, 0);    // Start at CGRAM position 0, fills 0-6
+
+                for(block=0; block<7; block++){
+                    for (x=0; x<8; x++){
+                        lcd_write_byte(dotArray[7-x][block], 1);
+                    } 
+                }
+                // Display is updated immediately when CGRAM changes
+                graphBlock++;
+
+                if(graphBlock > 7*5){                   // 7 blocks of 5 dots wide
+                    for(block=0; block<6; block++){     // Left shift the graph by one block
+                        for(x=0; x<8; x++){
+                            dotArray[x][block] = dotArray[x][block+1];
+                        }
+                    }
+                    for(x=0; x<8; x++){                 // Clear the last block ready for new data
+                        dotArray[x][7] = 0;
+                    }
+
+                    graphBlock = graphBlock-5;          // Graph pointer to start of the last block which is now blank
+                }
+                */
+                // Update the battery status
+                lcd_write_byte(0x78, 0);    // CGRAM position 7, battery symbol
+                if(vbatt >= VBATT_6of6){
+                    // Battery full 6/6
+                    lcd_write_byte(0b00110, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+
+                } else if ( vbatt >= VBATT_5of6){
+                    lcd_write_byte(0b00110, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+
+                } else if ( vbatt >= VBATT_4of6){
+                    lcd_write_byte(0b00110, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+
+                } else if ( vbatt >= VBATT_3of6){
+                    lcd_write_byte(0b00110, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+
+                } else if ( vbatt >= VBATT_2of6){
+                    lcd_write_byte(0b00110, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+
+                } else if ( vbatt >= VBATT_1of6){
+                    lcd_write_byte(0b00110, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01111, 1);
+                    lcd_write_byte(0b01111, 1);
+
+                } else if ( vbatt >= VBATT_0of6){
+                    lcd_write_byte(0b00110, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b01111, 1);
+
+                } else {
+                    lcd_write_byte(0b00110, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b00000, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b00000, 1);
+                    lcd_write_byte(0b01001, 1);
+                    lcd_write_byte(0b00000, 1);
+                    lcd_write_byte(0b01111, 1);
+                }
             }
-            */
-            // Update the battery status
-            lcd_write_byte(0x78, 0);    // CGRAM position 7, battery symbol
-            if(vbatt >= VBATT_6of6){
-                // Battery full 6/6
-                lcd_write_byte(0b00110, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
 
-            } else if ( vbatt >= VBATT_5of6){
-                lcd_write_byte(0b00110, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-
-            } else if ( vbatt >= VBATT_4of6){
-                lcd_write_byte(0b00110, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-
-            } else if ( vbatt >= VBATT_3of6){
-                lcd_write_byte(0b00110, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-
-            } else if ( vbatt >= VBATT_2of6){
-                lcd_write_byte(0b00110, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-
-            } else if ( vbatt >= VBATT_1of6){
-                lcd_write_byte(0b00110, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01111, 1);
-                lcd_write_byte(0b01111, 1);
-
-            } else if ( vbatt >= VBATT_0of6){
-                lcd_write_byte(0b00110, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b01111, 1);
-
-            } else {
-                lcd_write_byte(0b00110, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b00000, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b00000, 1);
-                lcd_write_byte(0b01001, 1);
-                lcd_write_byte(0b00000, 1);
-                lcd_write_byte(0b01111, 1);
-            }
-
+        } else {
+            calcFlag = 1;  
         }
         
         // Button short press is handled in interrupt, holds are done here
@@ -375,7 +388,12 @@ void main(void) {
                     sessionHigh = 0;
                     break;
                     
-                case 2:     // Reset alltime maximum
+                case 2:     // Reset session average
+                    sessionSum = 0;
+                    sessionTime = 0;
+                    break;    
+                    
+                case 3:     // Reset alltime maximum
                     alltimeHigh = 0;
                     EEPROM_write(0, ALLTIMEMAX_EEADDR);
                     EEPROM_write(0, ALLTIMEMAX_EEADDR+1);
@@ -389,44 +407,44 @@ void main(void) {
             case 0: // Normal (counter) screen
                 // 9999CPM 0.1us/hB   0CPM 0.0us/h   B
                 lcd_cursor(0,0);
-                intToString(cpm, 1, numStr, 1);
+                intToString(cpm, 1, numStr, 1, 0);
                 lcd_write_string(numStr);
                 lcd_write_string("CPM ");
-                intToString(counts, 1, numStr, 1);
-                //intToString(usv, CPM_uSV_DIV, numStr, 0);
+                //intToString(counts, 1, numStr, 1, 0);
+                intToString(usv, CPM_uSV_DIV, numStr, 0, 2);
                 lcd_write_string(numStr);
                 lcd_write_byte(0xE4, 1);
                 lcd_write_string("S/h      ");
                 
                 // Integer debugs
 //                lcd_cursor(0,0);
-//                intToString(hvfb, 1, numStr, 1);
+//                intToString(hvfb, 1, numStr, 1, 0);
 //                lcd_write_string(numStr);
 //                lcd_write_string(" ");
-//                intToString(errUndr, 1, numStr, 1);
+//                intToString(errUndr, 1, numStr, 1, 0);
 //                lcd_write_string(numStr);
 //                lcd_write_string(" ");
-//                intToString(errOver, 1, numStr, 1);
+//                intToString(errOver, 1, numStr, 1, 0);
 //                lcd_write_string(numStr);
 //                lcd_write_string("                ");
 
                 // Run Timer
                 lcd_cursor(1,0);
-                intToString(runtime/36000, 1, numStr, 1);          // Runtime hours
+                intToString(runtime/36000, 1, numStr, 1, 0);          // Runtime hours
                 lcd_write_string(numStr);
                 lcd_write_byte(':', 1);
-                intToString((runtime%36000)/600, 1, numStr, 2);    // Runtime minutes
+                intToString((runtime%36000)/600, 1, numStr, 2, 0);    // Runtime minutes
                 lcd_write_string(numStr);
                 lcd_write_byte(':', 1);
-                intToString((runtime/10)%60, 1, numStr, 2);        // Runtime seconds
+                intToString((runtime/10)%60, 1, numStr, 2, 0);        // Runtime seconds
                 lcd_write_string(numStr);
                 lcd_write_string(" ");
 
                 // Mini graph
-                lcd_cursor(1,8);
-                for(j=0; j<7; j++){
-                    lcd_write_byte(j, 1);
-                }
+//                lcd_cursor(1,8);
+//                for(j=0; j<7; j++){
+//                    lcd_write_byte(j, 1);
+//                }
 
                 // Battery State
                 lcd_cursor(1,15);
@@ -437,23 +455,36 @@ void main(void) {
                 lcd_cursor(0,0);
                 lcd_write_string("Session Maximum ");
                 lcd_cursor(1,0);
-                intToString(sessionHigh, 1, numStr, 1);
+                intToString(sessionHigh, 1, numStr, 1, 0);
                 lcd_write_string(numStr);
                 lcd_write_string("CPM ");
-                intToString(sessionHigh*CPM_uS_SCALE, 1, numStr, 1);
+                intToString(sessionHigh*CPM_uSV, CPM_uSV_DIV, numStr, 0, 2);
                 lcd_write_string(numStr);
                 lcd_write_byte(0xE4, 1);
                 lcd_write_string("S/h      ");
                 break;
                 
-            case 2:     // Alltime max screen
+            case 2:     // Session avg screen
+                lcd_cursor(0,0);
+                lcd_write_string("Session Average ");
+                lcd_cursor(1,0);
+                intToString(sessionSum/sessionTime, 1, numStr, 1, 0);
+                lcd_write_string(numStr);
+                lcd_write_string("CPM ");
+                intToString((sessionSum/sessionTime)*CPM_uSV, CPM_uSV_DIV, numStr, 0, 2);
+                lcd_write_string(numStr);
+                lcd_write_byte(0xE4, 1);
+                lcd_write_string("S/h      ");
+                break;    
+                
+            case 3:     // Alltime max screen
                 lcd_cursor(0,0);
                 lcd_write_string("All-Time Maximum");
                 lcd_cursor(1,0);
-                intToString(alltimeHigh, 1, numStr, 1);
+                intToString(alltimeHigh, 1, numStr, 1, 0);
                 lcd_write_string(numStr);
                 lcd_write_string("CPM ");
-                intToString(alltimeHigh*CPM_uS_SCALE, 1, numStr, 1);
+                intToString(alltimeHigh*CPM_uSV, CPM_uSV_DIV, numStr, 0, 2);
                 lcd_write_string(numStr);
                 lcd_write_byte(0xE4, 1);
                 lcd_write_string("S/h      ");
@@ -621,7 +652,7 @@ void __interrupt() isr(void)
         if(!(PORTB & 0b10000000)){  // Every 100ms we get closer to a good button register. If IOC detects the pin go low, btn is reset
             // Check if this release constitutes a button press event
             if(btn > BTN_PRESS_100ms && btn != 255){
-                if(displayState < 2){
+                if(displayState < 3){
                     displayState++;
                 } else {
                     displayState = 0;
@@ -728,7 +759,7 @@ void lcd_clear(){
     __delay_us(2000);           // 1500 works too, spec unknown
     return;
 }
-
+/*
 void clear_graph(){
     
     char j;
@@ -745,7 +776,7 @@ void clear_graph(){
         lcd_write_byte(0x0, 1);
     }
 }
-
+*/
 void lcd_write_string(char *stringArray){
     
     while (*stringArray){
@@ -756,7 +787,7 @@ void lcd_write_string(char *stringArray){
 }
 
 // Returns number of digits in UNSIGNED 'num' (min value = 0 for digits = 1, max value = 4294967295 for digits = 9)
-char numDigits(unsigned short num) {
+char numDigits(unsigned long num) {
     if (num < 10)
         return 1;
     else if (num < 100)
@@ -765,13 +796,23 @@ char numDigits(unsigned short num) {
         return 3;
     else if (num < 10000)
         return 4;
-    else 
+    else if (num < 100000)
         return 5;
+    else if (num < 1000000)
+        return 6;
+    else if (num < 10000000)
+        return 7;
+    else if (num < 100000000)
+        return 8;
+    else if (num < 1000000000)
+        return 9;
+    else // num <= 4294967295
+        return 10;
 }
 
 // Convert long to null terminated string. When divisor=1, you get exactly what you put in, eg 123 -> "123\0". Divisor=1000: 12345 -> "12.345\0"
 // fixedWidth should be 1 for normal, or the total whole digits if zero padding is required. eg: fixedWidth=2 would give 0-> 00, 5-> 05 32->32. 
-char intToString(unsigned short number, unsigned short divisor, char* dest, char fixedWidth) {
+char intToString(unsigned long number, unsigned long divisor, char* dest, char fixedWidth, char reduceDecimals) {
     char i, k;  
     char j=0;   //1=has decimal point
     char digits_decimal, digits_whole;
@@ -811,9 +852,9 @@ char intToString(unsigned short number, unsigned short divisor, char* dest, char
         dest[digits_whole +k -i -1] = (number % 10) + 48;
         number = number / 10;
     }
-    dest[digits_whole+digits_decimal + j + k] = '\0';
+    dest[digits_whole+digits_decimal + j + k - reduceDecimals] = '\0';
 
-    return digits_whole+digits_decimal + j + k;  
+    return digits_whole+digits_decimal + j + k - reduceDecimals;  
 }
 
 void EEPROM_write(char data, char addr) {

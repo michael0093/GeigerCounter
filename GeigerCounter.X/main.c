@@ -71,6 +71,12 @@
 #define SLOW_COUNT_TIME     600     // x0.1s CPM calculation time window (update rate)
 #define BATT_TIME           5       // x0.1s Battery symbol update rate
 
+#define COUNTS_PER_PIXEL    1
+#define BLOCK_X             5       // Each HD44780 block is 5x7 pixels
+#define BLOCK_Y             7
+#define PIXELS_PER_BLOCK    (BLOCK_X*BLOCK_Y)   
+#define COUNTS_PER_BLOCK    (COUNTS_PER_PIXEL*PIXELS_PER_BLOCK)
+
 #define FAST_COUNT_TIME_MULT (600/FAST_COUNT_TIME)            // Multiply the counts within the COUNT_TIME to get CPM. 600 = 60sec in 0.1s
 #define SLOW_COUNT_TIME_MULT 1            // Multiply the counts within the COUNT_TIME to get CPM. 600 = 60sec in 0.1s
 #define FAST_COUNTS_MAX      (CPM_MAX/FAST_COUNT_TIME_MULT)   // Stop counting after this many within the COUNT_TIME
@@ -126,7 +132,7 @@ void lcd_write_string(char *stringArray);
 void EEPROM_write(char data, char addr);
 char EEPROM_read(char addr);
 
-//void clear_graph();
+void clear_graph();
 char numDigits(unsigned long num);
 char intToString(unsigned long number, unsigned long divisor, char* dest, char fixedWidth, char reduceDecimals);    // Convert long to null terminated string. When divisor=1, you get exactly what you put in
 
@@ -171,10 +177,10 @@ void main(void) {
     lcd_cursor(1,5);
     lcd_write_string("V0.3");
         
-//    clear_graph();
+    clear_graph();
     
     char j;
-//    char graphBlock = 0;
+    char graphBlock = 0;
     unsigned short sessionHigh = 0;
     unsigned long  sessionSum  = 0;
     unsigned short sessionTime = 0;
@@ -244,48 +250,14 @@ void main(void) {
 //                    }
                 }
 
-                /*
-                // Update the graph
-                char x, block;
-                unsigned short gY;
-                static char dotArray[8][7] = {{0}};
-
-                gY = cpm*8;
-                gY = gY / sessionHigh;
-
-    //            dotArray[gY][graphBlock/5] |= 1 << (4-(graphBlock%5));
-                dotArray[0][0] = 1;
-                dotArray[1][0] = 2;
-                dotArray[2][0] = 3;
-                dotArray[3][0] = 4;
-                dotArray[4][0] = 5;
-                dotArray[5][0] = 6;
-                dotArray[6][0] = 7;
-                dotArray[7][0] = 8;
-
-                lcd_write_byte(0x40, 0);    // Start at CGRAM position 0, fills 0-6
-
-                for(block=0; block<7; block++){
-                    for (x=0; x<8; x++){
-                        lcd_write_byte(dotArray[7-x][block], 1);
-                    } 
+                // Move CPM graph onto the next block
+                if (graphBlock < 6){
+                    graphBlock++;
+                } else {
+                    graphBlock = 0;
+                    clear_graph();
                 }
-                // Display is updated immediately when CGRAM changes
-                graphBlock++;
-
-                if(graphBlock > 7*5){                   // 7 blocks of 5 dots wide
-                    for(block=0; block<6; block++){     // Left shift the graph by one block
-                        for(x=0; x<8; x++){
-                            dotArray[x][block] = dotArray[x][block+1];
-                        }
-                    }
-                    for(x=0; x<8; x++){                 // Clear the last block ready for new data
-                        dotArray[x][7] = 0;
-                    }
-
-                    graphBlock = graphBlock-5;          // Graph pointer to start of the last block which is now blank
-                }
-                */
+                
                 // Update the battery status
                 lcd_write_byte(0x78, 0);    // CGRAM position 7, battery symbol
                 if(vbatt >= VBATT_6of6){
@@ -441,10 +413,10 @@ void main(void) {
                 lcd_write_string(" ");
 
                 // Mini graph
-//                lcd_cursor(1,8);
-//                for(j=0; j<7; j++){
-//                    lcd_write_byte(j, 1);
-//                }
+                lcd_cursor(1,8);
+                for(j=0; j<7; j++){
+                    lcd_write_byte(j, 1);   // Display contents of CGRAM 0-6
+                }
 
                 // Battery State
                 lcd_cursor(1,15);
@@ -545,7 +517,30 @@ void main(void) {
         // If the count changed, pulse the LED/buzzer
         if(newCnt){
             PORTB |= 0b01000000;    // LED/buzzer on 
-            newCnt = 0;
+            newCnt = 0;             // 'counts' is updated in the ISR
+            
+            // Update CPM graph block
+            static char countsArray[7] = {0};
+
+            if( counts > COUNTS_PER_BLOCK ){
+                countsArray[graphBlock] = COUNTS_PER_BLOCK;
+            } else {
+                countsArray[graphBlock] = counts;
+            }
+            
+            
+
+            lcd_write_byte(0x40, 0);    // Start at CGRAM position 0, fills 0-6
+
+            char row, block, expanded;
+            
+            for(block=0; block<7; block++){
+                for (row=0; row<8; row++){
+                    expanded = countsArray[block] / (row*BLOCK_X);
+                    lcd_write_byte(expanded, 1);
+                } 
+            }
+            // Display is updated immediately when CGRAM changes
         }           
         __delay_ms(10);             // Slow down display update to prevent flicker
         PORTB &= ~0b01000000;       // LED/buzzer off 
@@ -759,7 +754,7 @@ void lcd_clear(){
     __delay_us(2000);           // 1500 works too, spec unknown
     return;
 }
-/*
+
 void clear_graph(){
     
     char j;
@@ -776,7 +771,7 @@ void clear_graph(){
         lcd_write_byte(0x0, 1);
     }
 }
-*/
+
 void lcd_write_string(char *stringArray){
     
     while (*stringArray){

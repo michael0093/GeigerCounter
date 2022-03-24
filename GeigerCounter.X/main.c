@@ -73,7 +73,7 @@
 
 #define COUNTS_PER_PIXEL    1
 #define BLOCK_X             5       // Each HD44780 block is 5x7 pixels
-#define BLOCK_Y             7
+#define BLOCK_Y             8
 #define PIXELS_PER_BLOCK    (BLOCK_X*BLOCK_Y)   
 #define COUNTS_PER_BLOCK    (COUNTS_PER_PIXEL*PIXELS_PER_BLOCK)
 
@@ -115,13 +115,14 @@ volatile unsigned char errUndr  = 0;
 unsigned short cpm              = 0;
 unsigned long usv               = 0;
 volatile char displayState      = 0;        // 0: normal screen. 1: session max. 2: alltime max
+char countsArray[7] = {0};
 
 //volatile char dbg = 0;
 
 char HV_Startup_Duty = 0;
 uint16_t count_max;
 
-void nop_delay(volatile unsigned short nops);
+//void nop_delay(volatile unsigned short nops);
 void lcd_init();
 void lcd_clear();
 void lcd_cursor(char row, char column);
@@ -226,7 +227,7 @@ void main(void) {
     runtime = 0;    // Reset runtime counter just before start so that battery icon gets shown immediately
             
     while(1){
-        
+        todo: pretty sure sessionTime and graphBlock are incrementing immediately on start
         if(runtime % count_time == 0){   // It is a multiple of the count time
             
             if(calcFlag == 1){    // Only do this once per matching runtime value
@@ -242,12 +243,12 @@ void main(void) {
                 counts = 0;     // new time 'block'
                 if (cpm > sessionHigh){
                     sessionHigh = cpm;  // new session maximum
-//                    if(sessionHigh > alltimeHigh){
-//                        // New all-time high, save to EEPROM
-//                        alltimeHigh = sessionHigh;
-//                        EEPROM_write( (char)((alltimeHigh & 0xFF00) >> 8), ALLTIMEMAX_EEADDR );
-//                        EEPROM_write( (char)((alltimeHigh & 0xFF)),        ALLTIMEMAX_EEADDR+1 );
-//                    }
+                    if(sessionHigh > alltimeHigh){
+                        // New all-time high, save to EEPROM
+                        alltimeHigh = sessionHigh;
+                        EEPROM_write( (char)((alltimeHigh & 0xFF00) >> 8), ALLTIMEMAX_EEADDR );
+                        EEPROM_write( (char)((alltimeHigh & 0xFF)),        ALLTIMEMAX_EEADDR+1 );
+                    }
                 }
 
                 // Move CPM graph onto the next block
@@ -256,6 +257,13 @@ void main(void) {
                 } else {
                     graphBlock = 0;
                     clear_graph();
+                    countsArray[0] = 0;
+                    countsArray[1] = 0;
+                    countsArray[2] = 0;
+                    countsArray[3] = 0;
+                    countsArray[4] = 0;
+                    countsArray[5] = 0;
+                    countsArray[6] = 0;
                 }
                 
                 // Update the battery status
@@ -520,23 +528,29 @@ void main(void) {
             newCnt = 0;             // 'counts' is updated in the ISR
             
             // Update CPM graph block
-            static char countsArray[7] = {0};
-
             if( counts > COUNTS_PER_BLOCK ){
                 countsArray[graphBlock] = COUNTS_PER_BLOCK;
             } else {
                 countsArray[graphBlock] = counts;
             }
             
-            
-
             lcd_write_byte(0x40, 0);    // Start at CGRAM position 0, fills 0-6
 
-            char row, block, expanded;
+            char row, block, expanded, x, j;
             
             for(block=0; block<7; block++){
-                for (row=0; row<8; row++){
-                    expanded = countsArray[block] / (row*BLOCK_X);
+                x = countsArray[block];
+                for (row=0; row<BLOCK_Y; row++){
+                    expanded = 0xFF;
+                    for(j=0; j<BLOCK_X; j++){
+                        if(x > 0){
+                            x--;
+                            expanded = expanded >> 1;
+                        }
+                    }
+                    
+                    expanded = ~expanded;
+                    expanded = expanded >> (8-BLOCK_X);
                     lcd_write_byte(expanded, 1);
                 } 
             }
@@ -662,12 +676,12 @@ void __interrupt() isr(void)
 }
 
 // 10000 nops = 69.8ms
-void nop_delay(volatile unsigned short nops){
-    for(; nops>0; nops--){
-        asm("nop");
-    }
-    return;
-}
+//void nop_delay(volatile unsigned short nops){
+//    for(; nops>0; nops--){
+//        asm("nop");
+//    }
+//    return;
+//}
 
 void lcd_init(){
     // Wait at least 40ms after power application (PWRTE covers this)

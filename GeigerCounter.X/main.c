@@ -176,7 +176,7 @@ void main(void) {
     lcd_init();
     lcd_write_string(" GEIGER COUNTER");
     lcd_cursor(1,5);
-    lcd_write_string("V0.3");
+    lcd_write_string("V0.4");
         
     clear_graph();
     
@@ -211,7 +211,7 @@ void main(void) {
     
     uint16_t count_time;
     uint8_t  count_mult;
-    uint8_t  calcFlag = 1;
+    uint8_t  calcFlag = 0;
             
     if(fastmode & 0b10000000){
         count_time = FAST_COUNT_TIME;
@@ -227,7 +227,6 @@ void main(void) {
     runtime = 0;    // Reset runtime counter just before start so that battery icon gets shown immediately
             
     while(1){
-        todo: pretty sure sessionTime and graphBlock are incrementing immediately on start
         if(runtime % count_time == 0){   // It is a multiple of the count time
             
             if(calcFlag == 1){    // Only do this once per matching runtime value
@@ -255,14 +254,14 @@ void main(void) {
                 if (graphBlock < 6){
                     graphBlock++;
                 } else {
-                    graphBlock = 0;
+                    graphBlock = 6;     // Scroll the graph one place
                     clear_graph();
-                    countsArray[0] = 0;
-                    countsArray[1] = 0;
-                    countsArray[2] = 0;
-                    countsArray[3] = 0;
-                    countsArray[4] = 0;
-                    countsArray[5] = 0;
+                    countsArray[0] = countsArray[1];
+                    countsArray[1] = countsArray[2];
+                    countsArray[2] = countsArray[3];
+                    countsArray[3] = countsArray[4];
+                    countsArray[4] = countsArray[5];
+                    countsArray[5] = countsArray[6];
                     countsArray[6] = 0;
                 }
                 
@@ -448,13 +447,16 @@ void main(void) {
                 lcd_cursor(0,0);
                 lcd_write_string("Session Average ");
                 lcd_cursor(1,0);
-                intToString(sessionSum/sessionTime, 1, numStr, 1, 0);
-                lcd_write_string(numStr);
-                lcd_write_string("CPM ");
-                intToString((sessionSum/sessionTime)*CPM_uSV, CPM_uSV_DIV, numStr, 0, 2);
-                lcd_write_string(numStr);
-                lcd_write_byte(0xE4, 1);
-                lcd_write_string("S/h      ");
+                
+                if(sessionTime > 0){
+                    intToString(sessionSum/sessionTime, 1, numStr, 1, 0);
+                    lcd_write_string(numStr);
+                    lcd_write_string("CPM ");
+                    intToString((sessionSum/sessionTime)*CPM_uSV, CPM_uSV_DIV, numStr, 0, 2);
+                    lcd_write_string(numStr);
+                    lcd_write_byte(0xE4, 1);
+                    lcd_write_string("S/h      ");
+                }                
                 break;    
                 
             case 3:     // Alltime max screen

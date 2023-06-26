@@ -36,14 +36,15 @@
 #define EVENT_100ms         0b00010000
 
 // 5x8 display supports battery capacitor symbol 0-6 (7 states)
-// Calculation is V*1203 / 5180. VDD=5.106V but 5.18V gives more accuracte test results
-#define VBATT_6of6          800     // >4.05V
-#define VBATT_5of6          780     // >3.95V
-#define VBATT_4of6          760     // >3.85V
-#define VBATT_3of6          751     // >3.80V
-#define VBATT_2of6          746     // >3.78V
-#define VBATT_1of6          735     // >3.72V
-#define VBATT_0of6          719     // >3.64
+// Calculation is V*1023 / 5180. VDD=5.106V but 5.18V gives more accuracte test results
+#define V_SUPPLY            4995                // VDD of CPU when running from battery booster
+#define VBATT_6of6          ((4050)/V_SUPPLY)   // >4.05V
+#define VBATT_5of6          ((3950)/V_SUPPLY)   // >3.95V
+#define VBATT_4of6          ((3850)/V_SUPPLY)   // >3.85V
+#define VBATT_3of6          ((3800)/V_SUPPLY)   // >3.80V
+#define VBATT_2of6          ((3780)/V_SUPPLY)   // >3.78V
+#define VBATT_1of6          ((3720)/V_SUPPLY)   // >3.72V
+#define VBATT_0of6          ((3640)/V_SUPPLY)   // >3.64
 
 #define LCD_RS              PORTAbits.RA6  // RA6 LCD RS Pin
 #define LCD_E               PORTAbits.RA7  // RA7 LCD E Pin
@@ -255,11 +256,12 @@ void main(void) {
             }
         }
         
-        if(runtime % count_time == 0){   // It is a multiple of the count time
+//        uint32_t runtime_cpy = runtime;
+        
+        if(runtime_cpy % count_time == 0){   // It is a multiple of the count time
             
             if(calcFlag == 1){    // Only do this once per matching runtime value
-                calcFlag = 0;
-                
+                                
                 // Update CPM and the alltime/session maximums
                 cpm = counts * count_mult;
                 usv = cpm * CPM_uSV;            // Still has to be divided by CPM_uSV_DIV to get uSv/h
@@ -295,6 +297,8 @@ void main(void) {
                 
                 // Update the battery status
                 batt_update();
+                
+                calcFlag = 0;   // Won't run again until next time rollover
             }
 
         } else {

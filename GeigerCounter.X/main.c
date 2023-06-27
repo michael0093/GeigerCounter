@@ -38,13 +38,14 @@
 // 5x8 display supports battery capacitor symbol 0-6 (7 states)
 // Calculation is V*1023 / 5180. VDD=5.106V but 5.18V gives more accuracte test results
 #define V_SUPPLY            4995                // VDD of CPU when running from battery booster
-#define VBATT_6of6          ((4050)/V_SUPPLY)   // >4.05V
-#define VBATT_5of6          ((3950)/V_SUPPLY)   // >3.95V
-#define VBATT_4of6          ((3850)/V_SUPPLY)   // >3.85V
-#define VBATT_3of6          ((3800)/V_SUPPLY)   // >3.80V
-#define VBATT_2of6          ((3780)/V_SUPPLY)   // >3.78V
-#define VBATT_1of6          ((3720)/V_SUPPLY)   // >3.72V
-#define VBATT_0of6          ((3640)/V_SUPPLY)   // >3.64
+#define ADCRES              1023
+#define VBATT_6of6          (((4050)/V_SUPPLY)*ADCRES)   // >4.05V
+#define VBATT_5of6          (((3950)/V_SUPPLY)*ADCRES)   // >3.95V
+#define VBATT_4of6          (((3850)/V_SUPPLY)*ADCRES)   // >3.85V
+#define VBATT_3of6          (((3800)/V_SUPPLY)*ADCRES)   // >3.80V
+#define VBATT_2of6          (((3780)/V_SUPPLY)*ADCRES)   // >3.78V
+#define VBATT_1of6          (((3720)/V_SUPPLY)*ADCRES)   // >3.72V
+#define VBATT_0of6          (((3640)/V_SUPPLY)*ADCRES)   // >3.64
 
 #define LCD_RS              PORTAbits.RA6  // RA6 LCD RS Pin
 #define LCD_E               PORTAbits.RA7  // RA7 LCD E Pin
@@ -87,7 +88,7 @@
 
 #define BTN_PRESS_100ms     2       // Number of 0.1s before registering button press. "2" could be as short as 100ms and as long as 200ms
 #define BTN_HOLD_100ms      20      // Number of 0.1s before registering button long-press. Max = 25
-#define BL_TIMEOUT          10      // Minutes
+#define BL_TIMEOUT          60000   // x0.1s max is 65535. So 60,000 = 10 minutes
 
 //    A0(an)	HVFB
 //    A1(an)	Vbatt
@@ -112,13 +113,14 @@ volatile uint16_t hvfb    = 0;
 volatile uint16_t counts  = 0;
 volatile uint16_t newCnt  = 0;        // =1 when count has increased
 volatile uint32_t runtime = 0;        // in 100ms increments
+volatile uint16_t cntTime = 0;        // in 100ms increments
 volatile uint8_t  errDuty = 0;
 volatile uint8_t  errOver = 0;
 volatile uint8_t  errUndr = 0;
 uint16_t cpm              = 0;
 uint32_t usv              = 0;
 volatile uint8_t displayState = 0;    // 0: normal screen. 1: session max. 2: alltime max
-volatile uint8_t  bl_timeout  = BL_TIMEOUT;
+volatile uint16_t  bl_timeout = BL_TIMEOUT;
 uint8_t  countsArray[7] = {0};
 
 //volatile uint8_t dbg = 0;
@@ -153,8 +155,7 @@ void main(void) {
     uint32_t sessionSum  = 0;
     uint16_t sessionTime = 0;
     uint16_t alltimeHigh;
-    uint8_t  calcFlag = 0;
-    uint16_t count_time;
+    uint16_t intg_time;
     uint8_t  count_mult;
     uint8_t  wdtr = 0;
     
@@ -205,7 +206,7 @@ void main(void) {
     
     // PORTB 0x80 is button. Brief hold at start = fast mode
     if(PORTB & 0b10000000){
-        count_time = FAST_COUNT_TIME;
+        intg_time = FAST_COUNT_TIME;
         count_mult = FAST_COUNT_TIME_MULT;
         count_max  = FAST_COUNTS_MAX;
         
@@ -213,7 +214,7 @@ void main(void) {
         lcd_write_string("Intg Time=10s");
         
     } else {
-        count_time = SLOW_COUNT_TIME;
+        intg_time = SLOW_COUNT_TIME;
         count_mult = SLOW_COUNT_TIME_MULT;
         count_max  = SLOW_COUNTS_MAX;
         
@@ -240,6 +241,7 @@ void main(void) {
     
     PORTB &= ~0b01000000;       // LED/buzzer off 
     runtime = 0;    // Reset runtime counter just before start so that battery icon gets shown immediately
+    cntTime = 0;
     
     // Update the battery status
     batt_update();
@@ -247,62 +249,50 @@ void main(void) {
     while(1){
         
         // Note: BL off is like 10mA saving which is < 10% of the total power consumption so hardly worth it
-        if(((runtime % 600) == 0) && calcFlag){  // 600x0.1s = 1 minute. calcFlag is cleared at least every minute so can reuse to ensure only decrements once
-            if(bl_timeout > 0){
-                bl_timeout--;   
-            } else {
-                // Times up, turn off backlight
-                PORTA = PORTA & 0b11111011;
-            }
-        }
-        
-//        uint32_t runtime_cpy = runtime;
-        
-        if(runtime_cpy % count_time == 0){   // It is a multiple of the count time
+
             
-            if(calcFlag == 1){    // Only do this once per matching runtime value
-                                
-                // Update CPM and the alltime/session maximums
-                cpm = counts * count_mult;
-                usv = cpm * CPM_uSV;            // Still has to be divided by CPM_uSV_DIV to get uSv/h
 
-                sessionSum = sessionSum + cpm;
-                sessionTime++;
-                
-                counts = 0;     // new time 'block'
-                if (cpm > sessionHigh){
-                    sessionHigh = cpm;  // new session maximum
-                    if(sessionHigh > alltimeHigh){
-                        // New all-time high, save to EEPROM
-                        alltimeHigh = sessionHigh;
-                        EEPROM_write( (uint8_t)((alltimeHigh & 0xFF00) >> 8), ALLTIMEMAX_EEADDR );
-                        EEPROM_write( (uint8_t)((alltimeHigh & 0xFF)),        ALLTIMEMAX_EEADDR+1 );
-                    }
-                }
+        
+        
+        if(cntTime >= intg_time){   // It is a multiple of the count time, Only do this once per matching cntTime value
 
-                // Move CPM graph onto the next block
-                if (graphBlock < 6){
-                    graphBlock++;
-                } else {
-                    graphBlock = 6;     // Scroll the graph one place
-                    countsArray[0] = countsArray[1];
-                    countsArray[1] = countsArray[2];
-                    countsArray[2] = countsArray[3];
-                    countsArray[3] = countsArray[4];
-                    countsArray[4] = countsArray[5];
-                    countsArray[5] = countsArray[6];
-                    countsArray[6] = 0;
-                    recalc_graph();     // Update the CGRAM which causes display update
+            // Update CPM and the alltime/session maximums
+            cpm = counts * count_mult;
+            usv = cpm * CPM_uSV;            // Still has to be divided by CPM_uSV_DIV to get uSv/h
+
+            cntTime = 0;   // Won't run again until next time rollover
+            
+            sessionSum = sessionSum + cpm;
+            sessionTime++;
+
+            counts = 0;     // new time 'block'
+            if (cpm > sessionHigh){
+                sessionHigh = cpm;  // new session maximum
+                if(sessionHigh > alltimeHigh){
+                    // New all-time high, save to EEPROM
+                    alltimeHigh = sessionHigh;
+                    EEPROM_write( (uint8_t)((alltimeHigh & 0xFF00) >> 8), ALLTIMEMAX_EEADDR );
+                    EEPROM_write( (uint8_t)((alltimeHigh & 0xFF)),        ALLTIMEMAX_EEADDR+1 );
                 }
-                
-                // Update the battery status
-                batt_update();
-                
-                calcFlag = 0;   // Won't run again until next time rollover
             }
 
-        } else {
-            calcFlag = 1;  
+            // Move CPM graph onto the next block
+            if (graphBlock < 6){
+                graphBlock++;
+            } else {
+                graphBlock = 6;     // Scroll the graph one place
+                countsArray[0] = countsArray[1];
+                countsArray[1] = countsArray[2];
+                countsArray[2] = countsArray[3];
+                countsArray[3] = countsArray[4];
+                countsArray[4] = countsArray[5];
+                countsArray[5] = countsArray[6];
+                countsArray[6] = 0;
+                recalc_graph();     // Update the CGRAM which causes display update
+            }
+
+            // Update the battery status
+            batt_update();
         }
         
         // Button short press is handled in interrupt, holds are done here
@@ -312,6 +302,7 @@ void main(void) {
             switch (displayState){
                 case 0:     // Normal counter screen, reset runtime
                     runtime = 0;
+                    cntTime = 0;
                     break;
                     
                 case 1:     // Reset session maximum
@@ -532,6 +523,13 @@ void __interrupt() isr(void)
     } else if (TMR1IE && TMR1IF) {
         // Timer1 is the 0.1s main time base
         runtime++;
+        cntTime++;
+        if(bl_timeout > 0){
+            bl_timeout--;   
+        } else {
+            // Times up, turn off backlight
+            PORTA = PORTA & 0b11111011;
+        }
         
         if(PORTB & 0b10000000){     // Every 100ms we get closer to a good button register. If IOC detects the pin go low, btn is reset
             if(bl_timeout == 0){

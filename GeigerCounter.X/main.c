@@ -88,7 +88,7 @@
 
 #define BTN_PRESS_100ms     2       // Number of 0.1s before registering button press. "2" could be as short as 100ms and as long as 200ms
 #define BTN_HOLD_100ms      20      // Number of 0.1s before registering button long-press. Max = 25
-#define BL_TIMEOUT          60000   // x0.1s max is 65535. So 60,000 = 10 minutes
+#define BL_TIMEOUT          6000    // x0.1s max is 65535. So 6,000 = 10 minutes
 
 //    A0(an)	HVFB
 //    A1(an)	Vbatt
@@ -112,16 +112,27 @@ volatile uint16_t vbatt   = 0;
 volatile uint16_t hvfb    = 0;
 volatile uint16_t counts  = 0;
 volatile uint16_t newCnt  = 0;        // =1 when count has increased
-volatile uint32_t runtime = 0;        // in 100ms increments
-volatile uint16_t cntTime = 0;        // in 100ms increments
-volatile uint8_t  errDuty = 0;
-volatile uint8_t  errOver = 0;
-volatile uint8_t  errUndr = 0;
-uint16_t cpm              = 0;
-uint32_t usv              = 0;
+volatile uint8_t tick_100ms = 0;
+volatile uint8_t errDuty = 0;
 volatile uint8_t displayState = 0;    // 0: normal screen. 1: session max. 2: alltime max
-volatile uint16_t  bl_timeout = BL_TIMEOUT;
+
+uint8_t errOver = 0;          // Even though many of these vars could be declared in the main() that increases code size a little, don't know why..
+uint8_t errUndr = 0;
+uint16_t cpm = 0;
+uint32_t usv = 0;
 uint8_t  countsArray[7] = {0};
+uint8_t  numStr[8];
+uint8_t  j;
+uint8_t  graphBlock = 0;
+uint16_t sessionHigh = 0;
+uint32_t sessionSum  = 0;
+uint16_t sessionTime = 0;
+uint16_t alltimeHigh;
+uint16_t intg_time;
+uint8_t  count_mult;
+uint8_t  wdtr = 0;
+uint32_t runtime = 0;        // in 100ms increments
+uint16_t bl_timeout = BL_TIMEOUT;
 
 //volatile uint8_t dbg = 0;
 
@@ -147,18 +158,6 @@ uint8_t intToString(uint32_t number, uint32_t divisor, uint8_t* dest, uint8_t fi
 void batt_update();
 
 void main(void) {
-    
-    uint8_t  numStr[8];
-    uint8_t  j;
-    uint8_t  graphBlock = 0;
-    uint16_t sessionHigh = 0;
-    uint32_t sessionSum  = 0;
-    uint16_t sessionTime = 0;
-    uint16_t alltimeHigh;
-    uint16_t intg_time;
-    uint8_t  count_mult;
-    uint8_t  wdtr = 0;
-    
     // Peripheral Setup
     OSCCON = 0b01111100;    // 8MHz internal osc  
     
@@ -241,59 +240,12 @@ void main(void) {
     
     PORTB &= ~0b01000000;       // LED/buzzer off 
     runtime = 0;    // Reset runtime counter just before start so that battery icon gets shown immediately
-    cntTime = 0;
+    tick_100ms = 0;
     
     // Update the battery status
     batt_update();
             
     while(1){
-        
-        // Note: BL off is like 10mA saving which is < 10% of the total power consumption so hardly worth it
-
-            
-
-        
-        
-        if(cntTime >= intg_time){   // It is a multiple of the count time, Only do this once per matching cntTime value
-
-            // Update CPM and the alltime/session maximums
-            cpm = counts * count_mult;
-            usv = cpm * CPM_uSV;            // Still has to be divided by CPM_uSV_DIV to get uSv/h
-
-            cntTime = 0;   // Won't run again until next time rollover
-            
-            sessionSum = sessionSum + cpm;
-            sessionTime++;
-
-            counts = 0;     // new time 'block'
-            if (cpm > sessionHigh){
-                sessionHigh = cpm;  // new session maximum
-                if(sessionHigh > alltimeHigh){
-                    // New all-time high, save to EEPROM
-                    alltimeHigh = sessionHigh;
-                    EEPROM_write( (uint8_t)((alltimeHigh & 0xFF00) >> 8), ALLTIMEMAX_EEADDR );
-                    EEPROM_write( (uint8_t)((alltimeHigh & 0xFF)),        ALLTIMEMAX_EEADDR+1 );
-                }
-            }
-
-            // Move CPM graph onto the next block
-            if (graphBlock < 6){
-                graphBlock++;
-            } else {
-                graphBlock = 6;     // Scroll the graph one place
-                countsArray[0] = countsArray[1];
-                countsArray[1] = countsArray[2];
-                countsArray[2] = countsArray[3];
-                countsArray[3] = countsArray[4];
-                countsArray[4] = countsArray[5];
-                countsArray[5] = countsArray[6];
-                countsArray[6] = 0;
-                recalc_graph();     // Update the CGRAM which causes display update
-            }
-
-            // Update the battery status
-            batt_update();
-        }
         
         // Button short press is handled in interrupt, holds are done here
         if(btn > BTN_HOLD_100ms && btn != 255){
@@ -302,7 +254,9 @@ void main(void) {
             switch (displayState){
                 case 0:     // Normal counter screen, reset runtime
                     runtime = 0;
-                    cntTime = 0;
+//                    counts = 0;
+//                    usv = 0;
+//                    cpm = 0;
                     break;
                     
                 case 1:     // Reset session maximum
@@ -321,106 +275,172 @@ void main(void) {
                     break;
             }
         }
-           
-        switch (displayState){
+        
+        
+        if(tick_100ms){     // New 100ms flag, Set in the ISR
+            tick_100ms = 0;
+            runtime++;
             
-            default:
-            case 0: // Normal (counter) screen
-                // 9999CPM 0.1us/hB   0CPM 0.0us/h   B
-                lcd_cursor(0,0);
-                intToString(cpm, 1, numStr, 1, 0);
-                lcd_write_string(numStr);
-                lcd_write_string("CPM ");
-                //intToString(counts, 1, numStr, 1, 0);
-                intToString(usv, CPM_uSV_DIV, numStr, 0, 2);
-                lcd_write_string(numStr);
-                lcd_write_byte(0xE4, 1);
-                lcd_write_string("S/h      ");
-                
-                // Integer debugs
-//                lcd_cursor(0,0);
-//                intToString(hvfb, 1, numStr, 1, 0);
-//                lcd_write_string(numStr);
-//                lcd_write_string(" ");
-//                intToString(errUndr, 1, numStr, 1, 0);
-//                lcd_write_string(numStr);
-//                lcd_write_string(" ");
-//                intToString(errOver, 1, numStr, 1, 0);
-//                lcd_write_string(numStr);
-//                lcd_write_string("                ");
+            // Backlight timeout. Note: its like 10mA saving: < 10% of the total power consumption so hardly worth it
+            if(bl_timeout > 0){     
+                bl_timeout--;   
+            } else {
+                // Times up, turn off backlight
+                PORTA = PORTA & 0b11111011;
+            }
+            
+            if(PORTB & 0b10000000){     // Every 100ms we get closer to a good button register. If IOC detects the pin go low, btn is reset
+                if(bl_timeout == 0){
+                    // Backlight off, btn turns it on, but doesnt do any button actions
+                    bl_timeout = BL_TIMEOUT;
+                    PORTA = PORTA | 0b00000100;
+                    btn = 255;  // Ignore button until release
+                }
+                if(btn < 254){          // 255 is the 'latched' value, meaning the main code doesnt want to process the button further
+                    btn++;
+                }
+            }
+        
+            if((runtime % intg_time) == 0){   // It is a multiple of the count time, Only do this once per matching cntTime value
 
-                // Run Timer
-                lcd_cursor(1,0);
-                intToString(runtime/36000, 1, numStr, 1, 0);          // Runtime hours
-                lcd_write_string(numStr);
-                lcd_write_byte(':', 1);
-                intToString((runtime%36000)/600, 1, numStr, 2, 0);    // Runtime minutes
-                lcd_write_string(numStr);
-                lcd_write_byte(':', 1);
-                intToString((runtime/10)%60, 1, numStr, 2, 0);        // Runtime seconds
-                lcd_write_string(numStr);
-                if(wdtr){
-                    // Possible WDT reset that the user should be aware of
-                    lcd_write_string("w");
+                // Update CPM and the alltime/session maximums
+                cpm = counts * count_mult;
+                usv = cpm * CPM_uSV;            // Still has to be divided by CPM_uSV_DIV to get uSv/h
+
+                sessionSum = sessionSum + cpm;
+                sessionTime++;
+
+                counts = 0;     // new time 'block'
+                if (cpm > sessionHigh){
+                    sessionHigh = cpm;  // new session maximum
+                    if(sessionHigh > alltimeHigh){
+                        // New all-time high, save to EEPROM
+                        alltimeHigh = sessionHigh;
+                        EEPROM_write( (uint8_t)((alltimeHigh & 0xFF00) >> 8), ALLTIMEMAX_EEADDR );
+                        EEPROM_write( (uint8_t)((alltimeHigh & 0xFF)),        ALLTIMEMAX_EEADDR+1 );
+                    }
+                }
+
+                // Move CPM graph onto the next block
+                if (graphBlock < 6){
+                    graphBlock++;
                 } else {
-                    lcd_write_string(" ");
+                    graphBlock = 6;     // Scroll the graph one place
+                    countsArray[0] = countsArray[1];
+                    countsArray[1] = countsArray[2];
+                    countsArray[2] = countsArray[3];
+                    countsArray[3] = countsArray[4];
+                    countsArray[4] = countsArray[5];
+                    countsArray[5] = countsArray[6];
+                    countsArray[6] = 0;
+                    recalc_graph();     // Update the CGRAM which causes display update
                 }
 
-                // Mini graph
-                lcd_cursor(1,8);
-                for(j=0; j<7; j++){
-                    lcd_write_byte(j, 1);   // Display contents of CGRAM 0-6
-                }
-
-                // Battery State
-                lcd_cursor(1,15);
-                lcd_write_byte(7, 1);       // Battery symbol (0x00:Empty to 0x06:Full)
-                break;
+                // Update the battery status
+                batt_update();
+            }
+        
             
-            case 1:     // Session max screen
-                lcd_cursor(0,0);
-                lcd_write_string("Session Maximum ");
-                lcd_cursor(1,0);
-                intToString(sessionHigh, 1, numStr, 1, 0);
-                lcd_write_string(numStr);
-                lcd_write_string("CPM ");
-                intToString(sessionHigh*CPM_uSV, CPM_uSV_DIV, numStr, 0, 2);
-                lcd_write_string(numStr);
-                lcd_write_byte(0xE4, 1);
-                lcd_write_string("S/h      ");
-                break;
-                
-            case 2:     // Session avg screen
-                lcd_cursor(0,0);
-                lcd_write_string("Session Average ");
-                lcd_cursor(1,0);
-                
-                if(sessionTime > 0){
-                    intToString(sessionSum/sessionTime, 1, numStr, 1, 0);
+            switch (displayState){
+
+                default:
+                case 0: // Normal (counter) screen
+                    // 9999CPM 0.1us/hB   0CPM 0.0us/h   B
+                    lcd_cursor(0,0);
+                    intToString(cpm, 1, numStr, 1, 0);
                     lcd_write_string(numStr);
                     lcd_write_string("CPM ");
-                    intToString((sessionSum/sessionTime)*CPM_uSV, CPM_uSV_DIV, numStr, 0, 2);
+                    //intToString(counts, 1, numStr, 1, 0);
+                    intToString(usv, CPM_uSV_DIV, numStr, 0, 2);
                     lcd_write_string(numStr);
                     lcd_write_byte(0xE4, 1);
                     lcd_write_string("S/h      ");
-                } else {
-                    lcd_write_string("     wait..     ");
-                }
-                break;    
-                
-            case 3:     // Alltime max screen
-                lcd_cursor(0,0);
-                lcd_write_string("All-Time Maximum");
-                lcd_cursor(1,0);
-                intToString(alltimeHigh, 1, numStr, 1, 0);
-                lcd_write_string(numStr);
-                lcd_write_string("CPM ");
-                intToString(alltimeHigh*CPM_uSV, CPM_uSV_DIV, numStr, 0, 2);
-                lcd_write_string(numStr);
-                lcd_write_byte(0xE4, 1);
-                lcd_write_string("S/h      ");
-                break;
-        } 
+
+                    // Integer debugs
+    //                lcd_cursor(0,0);
+    //                intToString(hvfb, 1, numStr, 1, 0);
+    //                lcd_write_string(numStr);
+    //                lcd_write_string(" ");
+    //                intToString(errUndr, 1, numStr, 1, 0);
+    //                lcd_write_string(numStr);
+    //                lcd_write_string(" ");
+    //                intToString(errOver, 1, numStr, 1, 0);
+    //                lcd_write_string(numStr);
+    //                lcd_write_string("                ");
+
+                    // Run Timer
+                    lcd_cursor(1,0);
+                    intToString(runtime/36000, 1, numStr, 1, 0);          // Runtime hours
+                    lcd_write_string(numStr);
+                    lcd_write_byte(':', 1);
+                    intToString((runtime%36000)/600, 1, numStr, 2, 0);    // Runtime minutes
+                    lcd_write_string(numStr);
+                    lcd_write_byte(':', 1);
+                    intToString((runtime/10)%60, 1, numStr, 2, 0);        // Runtime seconds
+                    lcd_write_string(numStr);
+                    if(wdtr){
+                        // Possible WDT reset that the user should be aware of
+                        lcd_write_string("w");
+                    } else {
+                        lcd_write_string(" ");
+                    }
+
+                    // Mini graph
+                    lcd_cursor(1,8);
+                    for(j=0; j<7; j++){
+                        lcd_write_byte(j, 1);   // Display contents of CGRAM 0-6
+                    }
+
+                    // Battery State
+                    lcd_cursor(1,15);
+                    lcd_write_byte(7, 1);       // Battery symbol (0x00:Empty to 0x06:Full)
+                    break;
+
+                case 1:     // Session max screen
+                    lcd_cursor(0,0);
+                    lcd_write_string("Session Maximum ");
+                    lcd_cursor(1,0);
+                    intToString(sessionHigh, 1, numStr, 1, 0);
+                    lcd_write_string(numStr);
+                    lcd_write_string("CPM ");
+                    intToString(sessionHigh*CPM_uSV, CPM_uSV_DIV, numStr, 0, 2);
+                    lcd_write_string(numStr);
+                    lcd_write_byte(0xE4, 1);
+                    lcd_write_string("S/h      ");
+                    break;
+
+                case 2:     // Session avg screen
+                    lcd_cursor(0,0);
+                    lcd_write_string("Session Average ");
+                    lcd_cursor(1,0);
+
+                    if(sessionTime > 0){
+                        intToString(sessionSum/sessionTime, 1, numStr, 1, 0);
+                        lcd_write_string(numStr);
+                        lcd_write_string("CPM ");
+                        intToString((sessionSum/sessionTime)*CPM_uSV, CPM_uSV_DIV, numStr, 0, 2);
+                        lcd_write_string(numStr);
+                        lcd_write_byte(0xE4, 1);
+                        lcd_write_string("S/h      ");
+                    } else {
+                        lcd_write_string("     wait..     ");
+                    }
+                    break;    
+
+                case 3:     // Alltime max screen
+                    lcd_cursor(0,0);
+                    lcd_write_string("All-Time Maximum");
+                    lcd_cursor(1,0);
+                    intToString(alltimeHigh, 1, numStr, 1, 0);
+                    lcd_write_string(numStr);
+                    lcd_write_string("CPM ");
+                    intToString(alltimeHigh*CPM_uSV, CPM_uSV_DIV, numStr, 0, 2);
+                    lcd_write_string(numStr);
+                    lcd_write_byte(0xE4, 1);
+                    lcd_write_string("S/h      ");
+                    break;
+            } 
+        } // 100ms tick handler
         
         // Check for hardware errors
         if(hvfb > (TARGET_HVFB+CURRERROR_LIMIT) && HV_Startup_Duty == HV_DUTY_MAX){
@@ -490,9 +510,9 @@ void main(void) {
             
             recalc_graph();
         }           
-        __delay_ms(15);             // Slow down display update to prevent flicker
+        __delay_ms(15);             
         PORTB &= ~0b01000000;       // LED/buzzer off 
-        __delay_ms(50);             // Slow down display update to prevent flicker
+        // No need to slow down LCD here since LCD only updated in 100ms handler
     }
     return;
 }
@@ -522,26 +542,8 @@ void __interrupt() isr(void)
         
     } else if (TMR1IE && TMR1IF) {
         // Timer1 is the 0.1s main time base
-        runtime++;
-        cntTime++;
-        if(bl_timeout > 0){
-            bl_timeout--;   
-        } else {
-            // Times up, turn off backlight
-            PORTA = PORTA & 0b11111011;
-        }
         
-        if(PORTB & 0b10000000){     // Every 100ms we get closer to a good button register. If IOC detects the pin go low, btn is reset
-            if(bl_timeout == 0){
-                // Backlight off, btn turns it on, but doesnt do any button actions
-                bl_timeout = BL_TIMEOUT;
-                PORTA = PORTA | 0b00000100;
-                btn = 255;  // Ignore button until release
-            }
-            if(btn < 254){          // 255 is the 'latched' value, meaning the main code doesnt want to process the button further
-                btn++;
-            }
-        }
+        tick_100ms = 1;
                
         TMR1H  = TMR1_CLOCK_RATE_H;
         TMR1L  = TMR1_CLOCK_RATE_L;

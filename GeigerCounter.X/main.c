@@ -190,11 +190,11 @@ void main(void) {
 
     // Welcome screen with version
     lcd_init();
-    lcd_write_string("  GEIGER V0.5  ");
+    lcd_write_string("  GEIGER V1.0  ");
     
-    char str[2];
-    intToString(PCON & 0x03, 1, str, 1, 0);     // PCON: X X X X X X /POR /BOR
-    lcd_write_string(str);
+//    char str[2];
+//    intToString(PCON & 0x03, 1, str, 1, 0);     // PCON: X X X X X X /POR /BOR
+//    lcd_write_string(str);
     if(PCON & 0x03 == 3){
         // Could be a watchdog reset
         wdtr = 1;
